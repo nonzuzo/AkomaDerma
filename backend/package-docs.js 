@@ -1,0 +1,17 @@
+/*
+package.json explanation:
+
+"name": "backend"           // Project name
+"version": "1.0.0"         // Project version
+"main": "index.js"         // Entry point of the app
+"scripts": {               // Scripts for running the app
+  "start": "node index.js" // Start app in production
+  "dev": "nodemon index.js"// Start app in development with auto-reload
+  "test": ...               // Test placeholder
+}
+"dependencies": {          // Packages required
+  "express": "^5.2.1"      // Web server framework
+  "cors": "^2.8.5"         // Handles cross-origin requests
+  "mysql2": "^3.5.2"       // MySQL database connection
+}
+*/
