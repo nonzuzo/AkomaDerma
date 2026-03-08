@@ -1,27 +1,23 @@
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 dotenv.config();
-
-// Import mysql2/promise for async/await support
 import mysql from "mysql2/promise";
 
-
-// Create a connection pool (better than single connection)
 const pool = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "1234",
-  database: "telederma_db",
+  host: process.env.MYSQLHOST || process.env.DB_HOST || "localhost",
+  port: parseInt(process.env.MYSQLPORT || process.env.DB_PORT || "3306"),
+  user: process.env.MYSQLUSER || process.env.DB_USER || "root",
+  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD || "1234",
+  database: process.env.MYSQLDATABASE || process.env.DB_NAME || "telederma_db",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
 });
 
-// Test the connection
 export async function connectDB() {
   try {
     const connection = await pool.getConnection();
-    console.log("Connected to MySQL database successfully!");
-    connection.release(); // Release the connection back to the pool
+    console.log(" Connected to MySQL database successfully!");
+    connection.release();
     return pool;
   } catch (error) {
     console.error(" Error connecting to MySQL:", error);
@@ -29,5 +25,4 @@ export async function connectDB() {
   }
 }
 
-// Export the pool for use in controllers
 export default pool;
