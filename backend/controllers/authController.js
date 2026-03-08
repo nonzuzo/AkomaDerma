@@ -5,24 +5,26 @@
 
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { Resend } from "resend"; // REPLACED: nodemailer → Resend
+import { Resend } from "resend";
 import pool from "../config/db.js";
 import crypto from "crypto";
 import dotenv from "dotenv";
 dotenv.config();
 
-// REPLACED: nodemailer transport → Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy initialization — only throws if email is actually sent, not on startup
+const getResend = () => {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not set in environment variables");
+  }
+  return new Resend(process.env.RESEND_API_KEY);
+};
 
-/**
- * Generate secure 6-digit passcode (100000-999999)
- */
 const generatePasscode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 /**
- * 1. USER SIGNUP - Creates pending user (is_approved=0)
+ * 1. USER SIGNUP
  * POST /api/auth/signup
  */
 export const signup = async (req, res) => {
@@ -80,7 +82,8 @@ export const login = async (req, res) => {
     if (users.length === 0) {
       console.log(" Login blocked - pending approval or needs passcode");
       return res.status(401).json({
-        error: "Invalid credentials, account not approved, or passcode not verified!",
+        error:
+          "Invalid credentials, account not approved, or passcode not verified!",
       });
     }
 
@@ -116,7 +119,9 @@ export const login = async (req, res) => {
           "INSERT INTO dermatologists (user_id, specialization, years_experience, created_at) VALUES (?, ?, ?, NOW())",
           [user.user_id, "Dermatologist", 0]
         );
-        console.log(`Auto-created dermatologist record for user ${user.user_id}`);
+        console.log(
+          `Auto-created dermatologist record for user ${user.user_id}`
+        );
       }
     }
 
@@ -196,8 +201,8 @@ export const approveUser = async (req, res) => {
 
     console.log(" Sending to:", user[0].email);
 
-    //  transport.sendMail → resend.emails.send.. all becuase of this deployment  mxm
-    const { error: emailError } = await resend.emails.send({
+    // ✅ getResend() called here — not at startup
+    const { error: emailError } = await getResend().emails.send({
       from: "AkomaDerma <onboarding@resend.dev>",
       to: user[0].email,
       subject: "Telederma Account Approved - Your Passcode",
@@ -285,13 +290,17 @@ export const getAuthStatus = async (req, res) => {
     );
 
     if (user.length === 0) {
-      return res.json({ status: "not_registered", message: "Please sign up first" });
+      return res.json({
+        status: "not_registered",
+        message: "Please sign up first",
+      });
     }
 
     if (user[0].is_approved === 0) {
       return res.json({
         status: "pending_approval",
-        message: "Awaiting admin approval. You will receive an email when approved.",
+        message:
+          "Awaiting admin approval. You will receive an email when approved.",
       });
     }
 
@@ -302,7 +311,10 @@ export const getAuthStatus = async (req, res) => {
       });
     }
 
-    res.json({ status: "ready_to_login", message: "Account fully verified and ready" });
+    res.json({
+      status: "ready_to_login",
+      message: "Account fully verified and ready",
+    });
   } catch (error) {
     console.error(" Status check error:", error);
     res.status(500).json({ error: error.message });
@@ -365,7 +377,9 @@ export const forgotPassword = async (req, res) => {
     );
 
     if (users.length === 0)
-      return res.json({ message: "If that email is registered, a reset link has been sent." });
+      return res.json({
+        message: "If that email is registered, a reset link has been sent.",
+      });
 
     const user = users[0];
 
@@ -384,8 +398,8 @@ export const forgotPassword = async (req, res) => {
 
     const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
 
-    // REPLACED: transport.sendMail → resend.emails.send
-    const { error: emailError } = await resend.emails.send({
+    // getResend() called here — not at startup
+    const { error: emailError } = await getResend().emails.send({
       from: "AkomaDerma <onboarding@resend.dev>",
       to: email,
       subject: "Reset Your TeleDerma Password",
@@ -415,7 +429,9 @@ export const forgotPassword = async (req, res) => {
       return res.status(500).json({ error: emailError.message });
     }
 
-    return res.json({ message: "If that email is registered, a reset link has been sent." });
+    return res.json({
+      message: "If that email is registered, a reset link has been sent.",
+    });
   } catch (error) {
     console.error("Forgot password error:", error.message);
     return res.status(500).json({ error: error.message });
@@ -431,10 +447,14 @@ export const resetPassword = async (req, res) => {
     const { token, password } = req.body;
 
     if (!token || !password)
-      return res.status(400).json({ error: "Token and new password are required" });
+      return res
+        .status(400)
+        .json({ error: "Token and new password are required" });
 
     if (password.length < 8)
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters" });
 
     const [tokens] = await pool.execute(
       `SELECT id, user_id
@@ -446,23 +466,26 @@ export const resetPassword = async (req, res) => {
 
     if (tokens.length === 0)
       return res.status(400).json({
-        error: "This reset link is invalid or has expired. Please request a new one.",
+        error:
+          "This reset link is invalid or has expired. Please request a new one.",
       });
 
     const { id: tokenId, user_id } = tokens[0];
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    await pool.execute(
-      "UPDATE users SET password_hash = ? WHERE user_id = ?",
-      [hashedPassword, user_id]
-    );
+    await pool.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", [
+      hashedPassword,
+      user_id,
+    ]);
 
     await pool.execute(
       "UPDATE password_reset_tokens SET used = 1 WHERE id = ?",
       [tokenId]
     );
 
-    return res.json({ message: "Password reset successfully. You can now log in." });
+    return res.json({
+      message: "Password reset successfully. You can now log in.",
+    });
   } catch (error) {
     console.error("Reset password error:", error.message);
     return res.status(500).json({ error: error.message });
