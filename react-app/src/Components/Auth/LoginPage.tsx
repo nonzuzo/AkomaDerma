@@ -59,7 +59,7 @@ export default function LoginPage() {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
-      const loginResponse = await fetch("import.meta.env.VITE_API_URL/auth/login", {
+      const loginResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/login`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
@@ -92,7 +92,7 @@ export default function LoginPage() {
           navigate("/dermatologist/dashboard", { replace: true });
         }
       } else {
-        const statusResponse = await fetch("import.meta.env.VITE_API_URL/auth/status", {
+        const statusResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/status`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify({ email: formData.email.trim() }),

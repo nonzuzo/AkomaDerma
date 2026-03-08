@@ -30,7 +30,7 @@ export default function PendingUsers() {
       }
 
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/auth/pending-users",
+        `${import.meta.env.VITE_API_URL}/auth/pending-users`,
         {
           method: "GET",
           headers: {

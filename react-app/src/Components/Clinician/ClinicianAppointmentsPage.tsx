@@ -219,7 +219,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/clinician/appointments/new-patient",
+        `${import.meta.env.VITE_API_URL}/clinician/appointments/new-patient`,
         {
           method: "POST",
           headers: {
@@ -256,7 +256,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/clinician/appointments/existing-patient",
+        `${import.meta.env.VITE_API_URL}/clinician/appointments/existing-patient`,
         {
           method: "POST",
           headers: {

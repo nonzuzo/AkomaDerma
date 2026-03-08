@@ -97,7 +97,7 @@ export default function ClinicianCreateCase() {
       }
 
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/clinicians/patients/search",
+        `${import.meta.env.VITE_API_URL}/clinicians/patients/search`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -180,7 +180,7 @@ export default function ClinicianCreateCase() {
 
       // 1) Create case (with vitals + image_count)
       const response = await fetch(
-        "import.meta.env.VITE_API_URL/clinicians/cases/submit",
+        `${import.meta.env.VITE_API_URL}/clinicians/cases/submit`,
         {
           method: "POST",
           headers: {

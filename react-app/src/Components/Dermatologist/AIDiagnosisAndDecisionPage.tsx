@@ -22,7 +22,7 @@ import {
   FileText,
 } from "lucide-react";
 
-const API = "import.meta.env.VITE_API_URL";
+const API = `${import.meta.env.VITE_API_URL}";
 const IMG_URL = "import.meta.env.VITE_UPLOADS_URL";
 const token = () => localStorage.getItem("token") ?? "";
 const auth = () => ({ Authorization: `Bearer ${token()}` });

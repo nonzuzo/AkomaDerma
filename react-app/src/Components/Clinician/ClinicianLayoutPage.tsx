@@ -103,7 +103,7 @@ export default function ClinicianLayout() {
   // ── Clinician profile ─────────────────────────────────────────────────────
   const fetchClinicianProfile = async () => {
     try {
-      const res = await fetch("import.meta.env.VITE_API_URL/clinicians/me", {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/clinicians/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401 || res.status === 403) {
@@ -131,7 +131,7 @@ export default function ClinicianLayout() {
   const fetchNotifications = async () => {
     try {
       const res = await fetch(
-        "import.meta.env.VITE_API_URL/clinicians/notifications",
+        `${import.meta.env.VITE_API_URL}/clinicians/notifications`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return;
@@ -163,7 +163,7 @@ export default function ClinicianLayout() {
   const markAllRead = async () => {
     try {
       await fetch(
-        "import.meta.env.VITE_API_URL/clinicians/notifications/read-all",
+        `${import.meta.env.VITE_API_URL}/clinicians/notifications/read-all`,
         { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }
       );
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
@@ -185,7 +185,7 @@ export default function ClinicianLayout() {
   const handleLogout = async () => {
     if (!window.confirm("Logout from AkomaDerma?")) return;
     try {
-      await fetch("import.meta.env.VITE_API_URL/auth/logout", {
+      await fetch(`${import.meta.env.VITE_API_URL}/auth/logout`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
