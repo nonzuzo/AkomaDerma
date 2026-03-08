@@ -1,4 +1,4 @@
-// controllers/dermatologistController.js
+// index.js
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
@@ -16,33 +16,43 @@ import appointmentRoutes from "./routes/appointmentRoutes.js";
 import patientRoutes from "./routes/patientRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import dermatologistRoutes from "./routes/dermatologistRoutes.js";
-import { setIO } from "./config/socket.js"
+import { setIO } from "./config/socket.js";
 
 dotenv.config();
+
 const app = express();
-const PORT = 5001;
+
+// Use Railway's dynamic PORT or fallback to 5001 locally
+const PORT = process.env.PORT || 5001;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const server = http.createServer(app);
 
+// Allowed origins — includes production frontend and local dev
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:5173",
+  "http://localhost:3000",
+].filter(Boolean); // removes undefined if CLIENT_URL is not set
+
+// Socket.IO with updated CORS to allow production frontend
 const io = new SocketIOServer(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   },
 });
 
-setIO(io); // ADDED — registers io so controllers can call getIO()
+setIO(io);
 
-// Socket.IO auth using the same JWT
+// Socket.IO JWT authentication middleware
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error("No token"));
-
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     socket.data.userId = payload.user_id;
     next();
@@ -67,44 +77,54 @@ io.on("connection", (socket) => {
   });
 });
 
-// REMOVED: export { io } — controllers now use getIO() from config/socket.js
+// ── MIDDLEWARE ────────────────────────────────────────────────────────────────
 
-// MIDDLEWARE
+// CORS — must be before all routes
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
+// Handle preflight OPTIONS requests for all routes
+app.options("*", cors());
+
 app.use(express.json());
 
+// Request logger
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`);
   console.log("   Query:", req.query);
   console.log(
     "   Headers:",
-    req.headers.authorization ? " Token present" : " No token"
+    req.headers.authorization ? "Token present" : "No token"
   );
   next();
 });
 
-// STATIC UPLOADS
+// ── STATIC FILES
+
+// Serve uploaded case images
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// ROUTES
+// ── ROUTES
+
 app.get("/", (req, res) => {
   res.send("Backend is running!");
 });
 
-app.use("/api/auth",          authRoutes);
-app.use("/api/cases",         caseRoutes);
-app.use("/api/clinicians",    clinicianRoutes);
-app.use("/api/patients",      patientRoutes);
-app.use("/api/clinician",     appointmentRoutes);
-app.use("/api/ai",            aiRoutes);
-app.use("/api/dermatologists",dermatologistRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/cases", caseRoutes);
+app.use("/api/clinicians", clinicianRoutes);
+app.use("/api/patients", patientRoutes);
+app.use("/api/clinician", appointmentRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/dermatologists", dermatologistRoutes);
+
+// ── START SERVER
 
 async function startServer() {
   try {
