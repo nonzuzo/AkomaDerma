@@ -97,7 +97,7 @@ export default function ClinicianCreateCase() {
       }
 
       const response = await fetch(
-        "http://localhost:5001/api/clinicians/patients/search",
+        "import.meta.env.VITE_API_URL/clinicians/patients/search",
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -130,7 +130,7 @@ export default function ClinicianCreateCase() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `http://localhost:5001/api/clinicians/patients/search?q=${encodeURIComponent(
+        `import.meta.env.VITE_API_URL/clinicians/patients/search?q=${encodeURIComponent(
           query
         )}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -180,7 +180,7 @@ export default function ClinicianCreateCase() {
 
       // 1) Create case (with vitals + image_count)
       const response = await fetch(
-        "http://localhost:5001/api/clinicians/cases/submit",
+        "import.meta.env.VITE_API_URL/clinicians/cases/submit",
         {
           method: "POST",
           headers: {
@@ -216,7 +216,7 @@ export default function ClinicianCreateCase() {
       images.forEach((img) => formDataImages.append("images", img));
 
       const imgRes = await fetch(
-        `http://localhost:5001/api/clinicians/cases/${caseId}/images`,
+        `import.meta.env.VITE_API_URL/clinicians/cases/${caseId}/images`,
         {
           method: "POST",
           headers: {

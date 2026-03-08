@@ -173,7 +173,7 @@ export default function ClinicianAppointments() {
 
       // GET /api/clinician/appointments?filter=today|week|all
       const response = await fetch(
-        `http://localhost:5001/api/clinician/appointments?filter=${filter}`,
+        `import.meta.env.VITE_API_URL/clinician/appointments?filter=${filter}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -219,7 +219,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "http://localhost:5001/api/clinician/appointments/new-patient",
+        "import.meta.env.VITE_API_URL/clinician/appointments/new-patient",
         {
           method: "POST",
           headers: {
@@ -256,7 +256,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        "http://localhost:5001/api/clinician/appointments/existing-patient",
+        "import.meta.env.VITE_API_URL/clinician/appointments/existing-patient",
         {
           method: "POST",
           headers: {
@@ -299,7 +299,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `http://localhost:5001/api/clinicians/patients/search?q=${encodeURIComponent(
+        `import.meta.env.VITE_API_URL/clinicians/patients/search?q=${encodeURIComponent(
           query
         )}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -323,7 +323,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `http://localhost:5001/api/clinician/appointments/${appointment_id}/status`,
+        `import.meta.env.VITE_API_URL/clinician/appointments/${appointment_id}/status`,
         {
           method: "PATCH",
           headers: {
@@ -349,7 +349,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `http://localhost:5001/api/clinician/appointments/${rescheduleModal.appointmentId}/reschedule`,
+        `import.meta.env.VITE_API_URL/clinician/appointments/${rescheduleModal.appointmentId}/reschedule`,
         {
           method: "PATCH",
           headers: {
@@ -531,7 +531,7 @@ export default function ClinicianAppointments() {
                 try {
                   const token = localStorage.getItem("token");
                   const res = await fetch(
-                    `http://localhost:5001/api/clinicians/patients/${pid}/ai-profile`,
+                    `import.meta.env.VITE_API_URL/clinicians/patients/${pid}/ai-profile`,
                     {
                       method: "POST",
                       headers: {

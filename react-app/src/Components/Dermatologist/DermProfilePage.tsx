@@ -22,7 +22,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-const API = "http://localhost:5001/api";
+const API = "import.meta.env.VITE_API_URL";
 const tok = () => localStorage.getItem("token") ?? "";
 const auth = () => ({
   "Content-Type": "application/json",

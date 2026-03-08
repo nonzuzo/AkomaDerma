@@ -103,7 +103,7 @@ export default function ClinicianLayout() {
   // ── Clinician profile ─────────────────────────────────────────────────────
   const fetchClinicianProfile = async () => {
     try {
-      const res = await fetch("http://localhost:5001/api/clinicians/me", {
+      const res = await fetch("import.meta.env.VITE_API_URL/clinicians/me", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401 || res.status === 403) {
@@ -131,7 +131,7 @@ export default function ClinicianLayout() {
   const fetchNotifications = async () => {
     try {
       const res = await fetch(
-        "http://localhost:5001/api/clinicians/notifications",
+        "import.meta.env.VITE_API_URL/clinicians/notifications",
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return;
@@ -146,7 +146,7 @@ export default function ClinicianLayout() {
   const markRead = async (id: number) => {
     try {
       await fetch(
-        `http://localhost:5001/api/clinicians/notifications/${id}/read`,
+        `import.meta.env.VITE_API_URL/clinicians/notifications/${id}/read`,
         { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }
       );
       setNotifications((prev) =>
@@ -163,7 +163,7 @@ export default function ClinicianLayout() {
   const markAllRead = async () => {
     try {
       await fetch(
-        "http://localhost:5001/api/clinicians/notifications/read-all",
+        "import.meta.env.VITE_API_URL/clinicians/notifications/read-all",
         { method: "PATCH", headers: { Authorization: `Bearer ${token}` } }
       );
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
@@ -185,7 +185,7 @@ export default function ClinicianLayout() {
   const handleLogout = async () => {
     if (!window.confirm("Logout from AkomaDerma?")) return;
     try {
-      await fetch("http://localhost:5001/api/auth/logout", {
+      await fetch("import.meta.env.VITE_API_URL/auth/logout", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -30,7 +30,7 @@ export default function PendingUsers() {
       }
 
       const response = await fetch(
-        "http://localhost:5001/api/auth/pending-users",
+        "import.meta.env.VITE_API_URL/auth/pending-users",
         {
           method: "GET",
           headers: {
@@ -69,7 +69,7 @@ export default function PendingUsers() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `http://localhost:5001/api/auth/approve/${userId}`,
+        `import.meta.env.VITE_API_URL/auth/approve/${userId}`,
         {
           method: "POST",
           headers: {

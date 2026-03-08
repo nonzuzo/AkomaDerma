@@ -69,7 +69,7 @@ export default function VerifyPasscode() {
     try {
       // POST to backend verification endpoint
       const response = await fetch(
-        "http://localhost:5001/api/auth/verify-passcode",
+        "import.meta.env.VITE_API_URL/auth/verify-passcode",
         {
           method: "POST",
           headers: {

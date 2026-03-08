@@ -19,7 +19,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-const API = "http://localhost:5001/api";
+const API = "import.meta.env.VITE_API_URL";
 const token = () => localStorage.getItem("token") ?? "";
 const auth = () => ({ Authorization: `Bearer ${token()}` });
 
@@ -428,7 +428,7 @@ export default function CaseDetailPage() {
               {images.map((img) => (
                 <div key={img.id} style={s.imageCard}>
                   <img
-                    src={`http://localhost:5001/${img.file_path}`}
+                    src={`import.meta.env.VITE_UPLOADS_URL/${img.file_path}`}
                     alt={`Case ${caseData.case_id} image`}
                     style={s.imageEl}
                   />
