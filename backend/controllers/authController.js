@@ -1,33 +1,21 @@
 /**
  * Telederma Authentication Controller v2.0
- * Complete auth flow: Signup → Admin Approval → Gmail Passcode → Verify → Login
- * Production-ready with Gmail SMTP, JWT, bcrypt, MySQL
- * Auto-redirect support via /status endpoint
+ * Complete auth flow: Signup → Admin Approval → Resend Passcode → Verify → Login
  */
 
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
+import { Resend } from "resend"; // REPLACED: nodemailer → Resend
 import pool from "../config/db.js";
-import crypto  from "crypto";
+import crypto from "crypto";
 import dotenv from "dotenv";
-dotenv.config(); // Load .env variables (GMAIL_USER, GMAIL_PASS, JWT_SECRET)
+dotenv.config();
 
-/**
- * Gmail SMTP Transport - Sends real emails to users
- * Uses App Password (16-char code from Google Account)
- */
-const transport = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER, //
-    pass: process.env.GMAIL_PASS, //
-  },
-});
+// REPLACED: nodemailer transport → Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
  * Generate secure 6-digit passcode (100000-999999)
- * @returns {string} 6-digit passcode
  */
 const generatePasscode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -42,14 +30,12 @@ export const signup = async (req, res) => {
     const { full_name, email, role, password } = req.body;
     console.log(" Signup payload:", req.body);
 
-    // Input validation
     if (!full_name || !email || !role || !password) {
       return res.status(400).json({
         error: "Missing required fields: full_name, email, role, password",
       });
     }
 
-    // Check if email exists
     const [existing] = await pool.execute(
       "SELECT * FROM users WHERE email = ?",
       [email]
@@ -58,10 +44,8 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
-    // Hash password (bcrypt, 10 salt rounds)
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert pending user
     const [result] = await pool.execute(
       "INSERT INTO users (full_name, email, role, password_hash, is_approved, created_at) VALUES (?, ?, ?, ?, 0, NOW())",
       [full_name, email, role, hashedPassword]
@@ -80,8 +64,7 @@ export const signup = async (req, res) => {
 };
 
 /**
- * 2. USER LOGIN - Requires approval + passcode verification
- * Only users with is_approved=1 AND passcode=NULL can login
+ * 2. USER LOGIN
  * POST /api/auth/login
  */
 export const login = async (req, res) => {
@@ -89,7 +72,6 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
     console.log(" Login attempt:", email);
 
-    // CRITICAL: Check approved AND passcode verified
     const [users] = await pool.execute(
       "SELECT * FROM users WHERE email = ? AND is_approved = 1 AND passcode IS NULL",
       [email]
@@ -98,27 +80,23 @@ export const login = async (req, res) => {
     if (users.length === 0) {
       console.log(" Login blocked - pending approval or needs passcode");
       return res.status(401).json({
-        error:
-          "Invalid credentials, account not approved, or passcode not verified!",
+        error: "Invalid credentials, account not approved, or passcode not verified!",
       });
     }
 
     const user = users[0];
 
-    // Verify password
     const validPass = await bcrypt.compare(password, user.password_hash);
     if (!validPass) {
       console.log(" Invalid password");
       return res.status(401).json({ error: "Invalid password" });
     }
-    // AUTO-CREATE CLINICIAN RECORD for new clinicians
+
     if (user.role === "clinician") {
       const [clinician] = await pool.execute(
         "SELECT clinician_id FROM clinicians WHERE user_id = ?",
         [user.user_id]
       );
-
-      // Create if missing
       if (clinician.length === 0) {
         await pool.execute(
           "INSERT INTO clinicians (user_id, clinic_name, created_at) VALUES (?, ?, NOW())",
@@ -138,15 +116,12 @@ export const login = async (req, res) => {
           "INSERT INTO dermatologists (user_id, specialization, years_experience, created_at) VALUES (?, ?, ?, NOW())",
           [user.user_id, "Dermatologist", 0]
         );
-        console.log(
-          `Auto-created dermatologist record for user ${user.user_id}`
-        );
+        console.log(`Auto-created dermatologist record for user ${user.user_id}`);
       }
     }
 
-    // Generate JWT (user_id payload)
     const token = jwt.sign({ user_id: user.user_id }, process.env.JWT_SECRET, {
-      expiresIn: "7d", // 7 days
+      expiresIn: "7d",
     });
 
     console.log(" Login success:", user.full_name);
@@ -186,7 +161,7 @@ export const getPendingUsers = async (req, res) => {
 };
 
 /**
- * 4. ADMIN: Approve user + send Gmail passcode
+ * 4. ADMIN: Approve user + send passcode via Resend
  * POST /api/auth/approve/:userId
  */
 export const approveUser = async (req, res) => {
@@ -197,7 +172,6 @@ export const approveUser = async (req, res) => {
 
     console.log(" Generated passcode:", passcode);
 
-    // Verify user exists
     const [userCheck] = await pool.execute(
       "SELECT * FROM users WHERE user_id = ?",
       [userId]
@@ -206,28 +180,27 @@ export const approveUser = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Update: approved + set passcode (24hr expiry)
     await pool.execute(
       "UPDATE users SET is_approved = 1, passcode = ?, passcode_expires_at = ? WHERE user_id = ?",
       [passcode, new Date(Date.now() + 24 * 60 * 60 * 1000), userId]
     );
 
-    // Get user email/name
     const [user] = await pool.execute(
       "SELECT email, full_name FROM users WHERE user_id = ?",
       [userId]
     );
-    console.log(" Sending to:", user[0].email);
 
     if (!user[0]?.email) {
       return res.status(500).json({ error: "User email not found" });
     }
 
-    // SEND REAL GMAIL
-    await transport.sendMail({
-      from: `"AkomaDerma " <${process.env.GMAIL_USER}>`, // Use your Gmail
+    console.log(" Sending to:", user[0].email);
+
+    //  transport.sendMail → resend.emails.send.. all becuase of this deployment  mxm
+    const { error: emailError } = await resend.emails.send({
+      from: "AkomaDerma <onboarding@resend.dev>",
       to: user[0].email,
-      subject: " Telederma Account Approved - Your Passcode",
+      subject: "Telederma Account Approved - Your Passcode",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #007bff;">Welcome ${user[0].full_name}!</h2>
@@ -241,6 +214,11 @@ export const approveUser = async (req, res) => {
       `,
     });
 
+    if (emailError) {
+      console.error(" Resend error:", emailError);
+      return res.status(500).json({ error: emailError.message });
+    }
+
     console.log(" Email sent successfully to", user[0].email);
     res.json({
       success: true,
@@ -253,7 +231,7 @@ export const approveUser = async (req, res) => {
 };
 
 /**
- * 5. USER: Verify passcode (clears passcode field)
+ * 5. USER: Verify passcode
  * POST /api/auth/verify-passcode
  */
 export const verifyPasscode = async (req, res) => {
@@ -261,7 +239,6 @@ export const verifyPasscode = async (req, res) => {
     const { email, passcode } = req.body;
     console.log(" Verifying passcode for:", email);
 
-    // Validate passcode (must match + not expired)
     const [users] = await pool.execute(
       `SELECT * FROM users 
        WHERE email = ? AND passcode = ? AND is_approved = 1 
@@ -274,7 +251,6 @@ export const verifyPasscode = async (req, res) => {
       return res.status(400).json({ error: "Invalid or expired passcode!" });
     }
 
-    // Clear passcode - user can now login
     await pool.execute(
       "UPDATE users SET passcode = NULL, passcode_expires_at = NULL WHERE email = ?",
       [email]
@@ -292,8 +268,7 @@ export const verifyPasscode = async (req, res) => {
 };
 
 /**
- * 6. STATUS CHECK - For frontend auto-redirect logic
- * Returns exact user state: not_registered | pending_approval | needs_passcode | ready_to_login
+ * 6. STATUS CHECK
  * POST /api/auth/status
  */
 export const getAuthStatus = async (req, res) => {
@@ -309,24 +284,17 @@ export const getAuthStatus = async (req, res) => {
       [email]
     );
 
-    // Not registered
     if (user.length === 0) {
-      return res.json({
-        status: "not_registered",
-        message: "Please sign up first",
-      });
+      return res.json({ status: "not_registered", message: "Please sign up first" });
     }
 
-    // Pending admin approval
     if (user[0].is_approved === 0) {
       return res.json({
         status: "pending_approval",
-        message:
-          "Awaiting admin approval. You will receive an email when approved.",
+        message: "Awaiting admin approval. You will receive an email when approved.",
       });
     }
 
-    // Needs passcode verification
     if (user[0].needs_passcode) {
       return res.json({
         status: "needs_passcode",
@@ -334,11 +302,7 @@ export const getAuthStatus = async (req, res) => {
       });
     }
 
-    //  Ready to login
-    res.json({
-      status: "ready_to_login",
-      message: "Account fully verified and ready",
-    });
+    res.json({ status: "ready_to_login", message: "Account fully verified and ready" });
   } catch (error) {
     console.error(" Status check error:", error);
     res.status(500).json({ error: error.message });
@@ -346,12 +310,12 @@ export const getAuthStatus = async (req, res) => {
 };
 
 /**
- * 7. TOKEN VERIFY - For protected routes + clinician dashboard
+ * 7. TOKEN VERIFY
  * GET /api/auth/verify
  */
 export const verifyToken = async (req, res) => {
   try {
-    const userId = req.user.user_id; // From auth middleware
+    const userId = req.user.user_id;
     console.log(" Verifying token for user:", userId);
 
     const [user] = await pool.execute(
@@ -363,7 +327,6 @@ export const verifyToken = async (req, res) => {
       return res.status(401).json({ error: "User not found" });
     }
 
-    // Clinician details (if applicable)
     let clinicianData = null;
     if (user[0].role === "clinician") {
       const [clinician] = await pool.execute(
@@ -387,91 +350,16 @@ export const verifyToken = async (req, res) => {
   }
 };
 
-// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
-// export const forgotPassword = async (req, res) => {
-//   try {
-//     const { email } = req.body;
-
-//     if (!email) return res.status(400).json({ error: "Email is required" });
-
-//     // Always return 200 regardless — never reveal if email exists (security)
-//     const [users] = await pool.execute(
-//       "SELECT user_id, full_name FROM users WHERE email = ?",
-//       [email.toLowerCase().trim()]
-//     );
-
-//     if (users.length === 0)
-//       return res.json({
-//         message: "If that email is registered, a reset link has been sent.",
-//       });
-
-//     const user = users[0];
-
-//     // Invalidate any existing unused tokens for this user first
-//     await pool.execute(
-//       "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
-//       [user.user_id]
-//     );
-
-//     // Generate a secure random token — expires in 1 hour
-//     const rawToken = crypto.randomBytes(32).toString("hex");
-//     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-
-//     await pool.execute(
-//       "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
-//       [user.user_id, rawToken, expiresAt]
-//     );
-
-//     const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
-
-//     await transporter.sendMail({
-//       from: `"TeleDerma" <${process.env.GMAIL_USER}>`,
-//       to: email,
-//       subject: "Reset Your TeleDerma Password",
-//       html: `
-//         <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;
-//                     padding: 2rem; border: 1px solid #e5e7eb; border-radius: 12px;">
-//           <h2 style="color: #1e293b; margin-bottom: 0.5rem;">Password Reset Request</h2>
-//           <p style="color: #64748b;">Hi ${user.full_name},</p>
-//           <p style="color: #64748b;">
-//             We received a request to reset your TeleDerma password.
-//             Click the button below to create a new one.
-//           </p>
-//           <a href="${resetLink}"
-//              style="display:inline-block; margin: 1.5rem 0; padding: 0.85rem 2rem;
-//                     background: linear-gradient(135deg, #3db5e6, #1e40af);
-//                     color: #fff; border-radius: 10px; text-decoration: none;
-//                     font-weight: 600; font-size: 1rem;">
-//             Reset Password
-//           </a>
-//           <p style="color: #9ca3af; font-size: 0.85rem;">
-//             This link expires in <b>1 hour</b>.
-//             If you didn't request this, you can safely ignore this email.
-//           </p>
-//           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 1.5rem 0;" />
-//           <p style="color: #cbd5e1; font-size: 0.75rem;">TeleDerma · Secure Health Platform</p>
-//         </div>
-//       `,
-//     });
-
-//     return res.json({
-//       message: "If that email is registered, a reset link has been sent.",
-//     });
-//   } catch (error) {
-//     console.error(
-//       "Forgot password FULL error:",
-//       JSON.stringify(error, null, 2)
-//     );
-//     return res.status(500).json({ error: "Failed to send reset email" });
-//   }
-// };
+/**
+ * 8. FORGOT PASSWORD
+ * POST /api/auth/forgot-password
+ */
 export const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email)
-      return res.status(400).json({ error: "Email is required" });
+    if (!email) return res.status(400).json({ error: "Email is required" });
 
-    const [users] = await pool.execute(                               // ← pool
+    const [users] = await pool.execute(
       "SELECT user_id, full_name FROM users WHERE email = ?",
       [email.toLowerCase().trim()]
     );
@@ -481,24 +369,25 @@ export const forgotPassword = async (req, res) => {
 
     const user = users[0];
 
-    await pool.execute(                                               // ← pool
+    await pool.execute(
       "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
       [user.user_id]
     );
 
-    const rawToken  = crypto.randomBytes(32).toString("hex");
+    const rawToken = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
-    await pool.execute(                                               // ← pool
+    await pool.execute(
       "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
       [user.user_id, rawToken, expiresAt]
     );
 
     const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
 
-    await transport.sendMail({
-      from:    `"TeleDerma" <${process.env.GMAIL_USER}>`,
-      to:      email,
+    // REPLACED: transport.sendMail → resend.emails.send
+    const { error: emailError } = await resend.emails.send({
+      from: "AkomaDerma <onboarding@resend.dev>",
+      to: email,
       subject: "Reset Your TeleDerma Password",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;
@@ -521,6 +410,11 @@ export const forgotPassword = async (req, res) => {
       `,
     });
 
+    if (emailError) {
+      console.error(" Resend error:", emailError);
+      return res.status(500).json({ error: emailError.message });
+    }
+
     return res.json({ message: "If that email is registered, a reset link has been sent." });
   } catch (error) {
     console.error("Forgot password error:", error.message);
@@ -528,6 +422,10 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
+/**
+ * 9. RESET PASSWORD
+ * POST /api/auth/reset-password
+ */
 export const resetPassword = async (req, res) => {
   try {
     const { token, password } = req.body;
@@ -538,7 +436,7 @@ export const resetPassword = async (req, res) => {
     if (password.length < 8)
       return res.status(400).json({ error: "Password must be at least 8 characters" });
 
-    const [tokens] = await pool.execute(                             // ← pool
+    const [tokens] = await pool.execute(
       `SELECT id, user_id
        FROM password_reset_tokens
        WHERE token = ? AND used = 0 AND expires_at > NOW()
@@ -552,15 +450,14 @@ export const resetPassword = async (req, res) => {
       });
 
     const { id: tokenId, user_id } = tokens[0];
-
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    await pool.execute(                                              // pool
-      "UPDATE users SET password_hash = ? WHERE user_id = ?",       //  password_hash
+    await pool.execute(
+      "UPDATE users SET password_hash = ? WHERE user_id = ?",
       [hashedPassword, user_id]
     );
 
-    await pool.execute(                                              // ←pool
+    await pool.execute(
       "UPDATE password_reset_tokens SET used = 1 WHERE id = ?",
       [tokenId]
     );
