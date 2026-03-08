@@ -2,11 +2,14 @@
 import db from "../config/db.js";
 import OpenAI from "openai";
 
-// OpenAI client — key loaded from .env via dotenv in index.js
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy init — only crashes when AI is actually called, not on server startup
+const getOpenAI = () => {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not set");
+  }
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+};
 
-// Simple in-memory cache — avoids re-calling OpenAI on every page refresh
-// Key = appointment_id, cleared on server restart
 const summaryCache = new Map();
 
 // ─── GET /api/clinician/appointments ─────────────────────────────────────────
@@ -74,7 +77,7 @@ export const getClinicianAppointments = async (req, res) => {
       params
     );
 
-    // Fire all OpenAI summary calls in parallel — one per appointment
+    // AI summaries run in parallel but never crash the whole response
     const enriched = await Promise.all(
       appointments.map(async (appt) => ({
         ...appt,
@@ -84,8 +87,9 @@ export const getClinicianAppointments = async (req, res) => {
 
     res.json(enriched);
   } catch (error) {
-    console.error("Appointments error:", error);
-    res.json([]);
+    // Return actual error instead of silent [] — helps debugging
+    console.error("Appointments error:", error.message);
+    res.status(500).json({ error: error.message });
   }
 };
 
@@ -100,7 +104,6 @@ async function generateAISummary(appt) {
       )
     : null;
 
-  // Only pass fields that have real values to keep the prompt clean
   const context = {
     patient: appt.patient_name,
     ...(age && { age: `${age} years old` }),
@@ -119,10 +122,11 @@ async function generateAISummary(appt) {
   };
 
   try {
-    const response = await openai.chat.completions.create({
+    // getOpenAI() called here — not at module load time becasen OpenAI client throws if API key is missing, and we don't want that to crash the whole appointments page on startup
+    const response = await getOpenAI().chat.completions.create({
       model: "gpt-3.5-turbo",
-      temperature: 0.3, // low = consistent clinical tone
-      max_tokens: 80, // enough for 2 tight sentences
+      temperature: 0.3,
+      max_tokens: 80,
       messages: [
         {
           role: "system",
@@ -171,7 +175,8 @@ function fallbackSummary(appt) {
       : "No active diagnosis on record."
   }`;
 }
-// ─── POST /api/clinician/appointments/new-patient ─────────────────────────────
+
+// ─── POST /api/clinician/appointments/new-patient ────────────────────────────
 export const createAppointmentForNewPatient = async (req, res) => {
   try {
     const {
@@ -194,7 +199,6 @@ export const createAppointmentForNewPatient = async (req, res) => {
       return res.status(400).json({ error: "Clinician not found" });
     const clinicianId = clinicians[0].clinician_id;
 
-    // Double-booking check — reject if another appointment is within 30 min
     const [existingSlot] = await db.execute(
       `SELECT appointment_id FROM appointments
        WHERE clinician_id = ?
@@ -206,7 +210,6 @@ export const createAppointmentForNewPatient = async (req, res) => {
     if (existingSlot.length > 0)
       return res.status(409).json({ error: "This time slot is already booked. Please choose a time at least 30 minutes apart." });
 
-    // Create patient first, then the appointment
     const [patientResult] = await db.execute(
       `INSERT INTO patients
          (first_name, last_name, date_of_birth, sex, contact_info, clinician_id, is_walkin)
@@ -228,7 +231,7 @@ export const createAppointmentForNewPatient = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinician/appointments/existing-patient ────────────────────────
+// ─── POST /api/clinician/appointments/existing-patient ───────────────────────
 export const createAppointmentForExistingPatient = async (req, res) => {
   try {
     const { patient_id, appointment_date, notes, reason_for_visit } = req.body;
@@ -247,7 +250,6 @@ export const createAppointmentForExistingPatient = async (req, res) => {
       return res.status(400).json({ error: "Clinician not found" });
     const clinicianId = clinicians[0].clinician_id;
 
-    // Verify this patient actually belongs to this clinician
     const [patients] = await db.execute(
       "SELECT patient_id FROM patients WHERE patient_id = ? AND clinician_id = ?",
       [patient_id, clinicianId]
@@ -255,7 +257,6 @@ export const createAppointmentForExistingPatient = async (req, res) => {
     if (patients.length === 0)
       return res.status(404).json({ error: "Patient not found under your account" });
 
-    // Double-booking check — 30 min window
     const [existingSlot] = await db.execute(
       `SELECT appointment_id FROM appointments
        WHERE clinician_id = ?
@@ -299,7 +300,6 @@ export const updateAppointmentStatus = async (req, res) => {
       return res.status(400).json({ error: "Clinician not found" });
     const clinicianId = clinicians[0].clinician_id;
 
-    // Dynamically set the relevant timestamp column alongside status
     let timestampField = "";
     if (status === "checked_in") timestampField = ", checked_in_at = NOW()";
     if (status === "completed")  timestampField = ", completed_at  = NOW()";
@@ -315,9 +315,7 @@ export const updateAppointmentStatus = async (req, res) => {
     if (result.affectedRows === 0)
       return res.status(404).json({ error: "Appointment not found" });
 
-    // Clear cached AI summary when status changes — forces fresh summary next load
     summaryCache.delete(`appt_${id}`);
-
     res.json({ success: true });
   } catch (error) {
     console.error("Update status error:", error);
@@ -325,7 +323,7 @@ export const updateAppointmentStatus = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/clinician/appointments/:id/reschedule ─────────────────────────
+// ─── PATCH /api/clinician/appointments/:id/reschedule ────────────────────────
 export const rescheduleAppointment = async (req, res) => {
   try {
     const { id }               = req.params;
@@ -345,7 +343,6 @@ export const rescheduleAppointment = async (req, res) => {
       return res.status(400).json({ error: "Clinician not found" });
     const clinicianId = clinicians[0].clinician_id;
 
-    // Double-booking check — exclude the current appointment being rescheduled
     const [existingSlot] = await db.execute(
       `SELECT appointment_id FROM appointments
        WHERE clinician_id = ?
@@ -368,13 +365,10 @@ export const rescheduleAppointment = async (req, res) => {
     if (result.affectedRows === 0)
       return res.status(404).json({ error: "Appointment not found" });
 
-    // Clear cache so the new date is reflected in the AI summary
     summaryCache.delete(`appt_${id}`);
-
     res.json({ success: true });
   } catch (error) {
     console.error("Reschedule error:", error);
     res.status(500).json({ error: "Failed to reschedule appointment" });
   }
 };
-

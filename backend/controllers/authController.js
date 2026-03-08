@@ -102,7 +102,7 @@ export const login = async (req, res) => {
       );
       if (clinician.length === 0) {
         await pool.execute(
-          "INSERT INTO clinicians (user_id, clinic_name, created_at) VALUES (?, ?, NOW())",
+          "INSERT INTO clinicians (user_id, clinic_name,created_at) VALUES (?, ?, NOW())",
           [user.user_id, "Rabito Clinic"]
         );
         console.log(`Auto-created clinician record for user ${user.user_id}`);
