@@ -555,12 +555,12 @@ export const resetPassword = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    await pool.execute(                                              // ← pool
-      "UPDATE users SET password_hash = ? WHERE user_id = ?",       // ← password_hash
+    await pool.execute(                                              // pool
+      "UPDATE users SET password_hash = ? WHERE user_id = ?",       //  password_hash
       [hashedPassword, user_id]
     );
 
-    await pool.execute(                                              // ← pool
+    await pool.execute(                                              // ←pool
       "UPDATE password_reset_tokens SET used = 1 WHERE id = ?",
       [tokenId]
     );

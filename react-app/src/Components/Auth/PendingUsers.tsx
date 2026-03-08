@@ -22,6 +22,7 @@ export default function PendingUsers() {
       setError("");
 
       // ADD AUTH TOKEN
+      //token from localStorage (set during admin login) is included in the Authorization header to authenticate the request. This is crucial because the /auth/pending-users endpoint is protected and only accessible to authenticated admins. If the token is missing, an error message prompts the user to log in as admin first.
       const token = localStorage.getItem("token");
       if (!token) {
         setError("Please login as admin first");
@@ -34,7 +35,7 @@ export default function PendingUsers() {
         {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${token}`, // ✅ CRITICAL FIX
+            Authorization: `Bearer ${token}`, // Include token for authentication because this is a protected admin route
             "Content-Type": "application/json",
           },
         }
@@ -57,11 +58,11 @@ export default function PendingUsers() {
   /////////////////////////////////////////////////////////////////////////
   //   export const approveUser = async (req, res) => {
   //     try {
-  //       console.log("🎯 approveUser called for userId:", req.params.userId);  // for checks
+  //       console.log(" approveUser called for userId:", req.params.userId);  // for checks
   //       const userId = req.params.userId;
 
   // ADMIN APPROVES USER - Sends passcode email and updates status
-  // REPLACE your approveUser function (around line 46):
+
   const approveUser = async (userId: number, email: string) => {
     if (!window.confirm(`Approve ${email} and send passcode email?`)) return;
 
@@ -69,7 +70,7 @@ export default function PendingUsers() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/auth/approve/${userId}`,
+        `${import.meta.env.VITE_API_URL}/auth/approve/${userId}`,
         {
           method: "POST",
           headers: {
