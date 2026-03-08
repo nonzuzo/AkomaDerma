@@ -1,3 +1,6 @@
-backend/ml_server/model.pt
-*.pt
+node_modules/
+dist/
 .env
+*.pt
+*.sql
+.DS_Store
