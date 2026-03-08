@@ -1,1 +1,3 @@
+backend/ml_server/model.pt
+*.pt
 .env

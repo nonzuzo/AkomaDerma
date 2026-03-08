@@ -9,6 +9,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import pool from "../config/db.js";
+import crypto  from "crypto";
 import dotenv from "dotenv";
 dotenv.config(); // Load .env variables (GMAIL_USER, GMAIL_PASS, JWT_SECRET)
 
@@ -19,8 +20,8 @@ dotenv.config(); // Load .env variables (GMAIL_USER, GMAIL_PASS, JWT_SECRET)
 const transport = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.GMAIL_USER, // nonzuzo.sikhosana@ashesi.edu.gh
-    pass: process.env.GMAIL_PASS, // Your 16-char app password
+    user: process.env.GMAIL_USER, //
+    pass: process.env.GMAIL_PASS, //
   },
 });
 
@@ -124,6 +125,22 @@ export const login = async (req, res) => {
           [user.user_id, "Rabito Clinic"]
         );
         console.log(`Auto-created clinician record for user ${user.user_id}`);
+      }
+    }
+
+    if (user.role === "dermatologist") {
+      const [derm] = await pool.execute(
+        "SELECT dermatologist_id FROM dermatologists WHERE user_id = ?",
+        [user.user_id]
+      );
+      if (derm.length === 0) {
+        await pool.execute(
+          "INSERT INTO dermatologists (user_id, specialization, years_experience, created_at) VALUES (?, ?, ?, NOW())",
+          [user.user_id, "Dermatologist", 0]
+        );
+        console.log(
+          `Auto-created dermatologist record for user ${user.user_id}`
+        );
       }
     }
 
@@ -367,5 +384,190 @@ export const verifyToken = async (req, res) => {
   } catch (error) {
     console.error(" Verify token error:", error);
     res.status(500).json({ error: "Token verification failed" });
+  }
+};
+
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+// export const forgotPassword = async (req, res) => {
+//   try {
+//     const { email } = req.body;
+
+//     if (!email) return res.status(400).json({ error: "Email is required" });
+
+//     // Always return 200 regardless — never reveal if email exists (security)
+//     const [users] = await pool.execute(
+//       "SELECT user_id, full_name FROM users WHERE email = ?",
+//       [email.toLowerCase().trim()]
+//     );
+
+//     if (users.length === 0)
+//       return res.json({
+//         message: "If that email is registered, a reset link has been sent.",
+//       });
+
+//     const user = users[0];
+
+//     // Invalidate any existing unused tokens for this user first
+//     await pool.execute(
+//       "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
+//       [user.user_id]
+//     );
+
+//     // Generate a secure random token — expires in 1 hour
+//     const rawToken = crypto.randomBytes(32).toString("hex");
+//     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+//     await pool.execute(
+//       "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+//       [user.user_id, rawToken, expiresAt]
+//     );
+
+//     const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
+
+//     await transporter.sendMail({
+//       from: `"TeleDerma" <${process.env.GMAIL_USER}>`,
+//       to: email,
+//       subject: "Reset Your TeleDerma Password",
+//       html: `
+//         <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;
+//                     padding: 2rem; border: 1px solid #e5e7eb; border-radius: 12px;">
+//           <h2 style="color: #1e293b; margin-bottom: 0.5rem;">Password Reset Request</h2>
+//           <p style="color: #64748b;">Hi ${user.full_name},</p>
+//           <p style="color: #64748b;">
+//             We received a request to reset your TeleDerma password.
+//             Click the button below to create a new one.
+//           </p>
+//           <a href="${resetLink}"
+//              style="display:inline-block; margin: 1.5rem 0; padding: 0.85rem 2rem;
+//                     background: linear-gradient(135deg, #3db5e6, #1e40af);
+//                     color: #fff; border-radius: 10px; text-decoration: none;
+//                     font-weight: 600; font-size: 1rem;">
+//             Reset Password
+//           </a>
+//           <p style="color: #9ca3af; font-size: 0.85rem;">
+//             This link expires in <b>1 hour</b>.
+//             If you didn't request this, you can safely ignore this email.
+//           </p>
+//           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 1.5rem 0;" />
+//           <p style="color: #cbd5e1; font-size: 0.75rem;">TeleDerma · Secure Health Platform</p>
+//         </div>
+//       `,
+//     });
+
+//     return res.json({
+//       message: "If that email is registered, a reset link has been sent.",
+//     });
+//   } catch (error) {
+//     console.error(
+//       "Forgot password FULL error:",
+//       JSON.stringify(error, null, 2)
+//     );
+//     return res.status(500).json({ error: "Failed to send reset email" });
+//   }
+// };
+export const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email)
+      return res.status(400).json({ error: "Email is required" });
+
+    const [users] = await pool.execute(                               // ← pool
+      "SELECT user_id, full_name FROM users WHERE email = ?",
+      [email.toLowerCase().trim()]
+    );
+
+    if (users.length === 0)
+      return res.json({ message: "If that email is registered, a reset link has been sent." });
+
+    const user = users[0];
+
+    await pool.execute(                                               // ← pool
+      "UPDATE password_reset_tokens SET used = 1 WHERE user_id = ? AND used = 0",
+      [user.user_id]
+    );
+
+    const rawToken  = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await pool.execute(                                               // ← pool
+      "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+      [user.user_id, rawToken, expiresAt]
+    );
+
+    const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${rawToken}`;
+
+    await transport.sendMail({
+      from:    `"TeleDerma" <${process.env.GMAIL_USER}>`,
+      to:      email,
+      subject: "Reset Your TeleDerma Password",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;
+                    padding: 2rem; border: 1px solid #e5e7eb; border-radius: 12px;">
+          <h2 style="color: #1e293b;">Password Reset Request</h2>
+          <p style="color: #64748b;">Hi ${user.full_name},</p>
+          <p style="color: #64748b;">Click the button below to reset your TeleDerma password.</p>
+          <a href="${resetLink}"
+             style="display:inline-block; margin: 1.5rem 0; padding: 0.85rem 2rem;
+                    background: linear-gradient(135deg, #3db5e6, #1e40af);
+                    color: #fff; border-radius: 10px; text-decoration: none;
+                    font-weight: 600;">
+            Reset Password
+          </a>
+          <p style="color: #9ca3af; font-size: 0.85rem;">
+            This link expires in <b>1 hour</b>.
+            If you didn't request this, ignore this email.
+          </p>
+        </div>
+      `,
+    });
+
+    return res.json({ message: "If that email is registered, a reset link has been sent." });
+  } catch (error) {
+    console.error("Forgot password error:", error.message);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password)
+      return res.status(400).json({ error: "Token and new password are required" });
+
+    if (password.length < 8)
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+
+    const [tokens] = await pool.execute(                             // ← pool
+      `SELECT id, user_id
+       FROM password_reset_tokens
+       WHERE token = ? AND used = 0 AND expires_at > NOW()
+       LIMIT 1`,
+      [token]
+    );
+
+    if (tokens.length === 0)
+      return res.status(400).json({
+        error: "This reset link is invalid or has expired. Please request a new one.",
+      });
+
+    const { id: tokenId, user_id } = tokens[0];
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    await pool.execute(                                              // ← pool
+      "UPDATE users SET password_hash = ? WHERE user_id = ?",       // ← password_hash
+      [hashedPassword, user_id]
+    );
+
+    await pool.execute(                                              // ← pool
+      "UPDATE password_reset_tokens SET used = 1 WHERE id = ?",
+      [tokenId]
+    );
+
+    return res.json({ message: "Password reset successfully. You can now log in." });
+  } catch (error) {
+    console.error("Reset password error:", error.message);
+    return res.status(500).json({ error: error.message });
   }
 };

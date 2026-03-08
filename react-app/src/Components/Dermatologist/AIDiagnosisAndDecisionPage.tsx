@@ -1,918 +1,1249 @@
-import React, { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+// src/Components/Dermatologist/AIDiagnosisAndDecisionPage.tsx
+import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
+  ArrowLeft,
   Brain,
   CheckCircle,
-  XCircle,
-  Edit3,
   AlertCircle,
-  TrendingUp,
+  ChevronRight,
+  Clock,
+  Activity,
+  Eye,
+  ImageIcon,
+  Stethoscope,
+  User,
+  ZoomIn,
+  X,
+  AlertTriangle,
+  ThumbsUp,
+  ThumbsDown,
+  Pill,
   FileText,
-  ArrowRight,
-  Info,
 } from "lucide-react";
 
-export default function AIDiagnosisReview() {
-  const { caseId } = useParams();
+const API = "http://localhost:5001/api";
+const IMG_URL = "http://localhost:5001";
+const token = () => localStorage.getItem("token") ?? "";
+const auth = () => ({ Authorization: `Bearer ${token()}` });
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface CaseDetail {
+  case_id: number;
+  patient_name: string;
+  patient_dob: string | null;
+  patient_sex: string | null;
+  chief_complaint: string;
+  lesion_location: string;
+  lesion_type: string | null;
+  lesion_duration: string | null;
+  symptoms: string | null;
+  prior_treatment: string | null;
+  clinician_name: string;
+  created_at: string;
+  status: string;
+}
+
+interface CaseImage {
+  id: number;
+  file_path: string;
+}
+
+interface AIPrediction {
+  predicted_label: string;
+  confidence_score: number;
+  model_version: string;
+  created_at: string;
+}
+
+// ─── Possible dermatological diagnoses for override dropdown ──────────────────
+const DIAGNOSIS_OPTIONS = [
+  "Melanoma",
+  "Basal Cell Carcinoma",
+  "Squamous Cell Carcinoma",
+  "Actinic Keratosis",
+  "Atopic Dermatitis (Eczema)",
+  "Psoriasis",
+  "Contact Dermatitis",
+  "Tinea Corporis (Ringworm)",
+  "Tinea Versicolor",
+  "Seborrheic Dermatitis",
+  "Rosacea",
+  "Urticaria (Hives)",
+  "Vitiligo",
+  "Alopecia Areata",
+  "Folliculitis",
+  "Impetigo",
+  "Cellulitis",
+  "Herpes Zoster (Shingles)",
+  "Molluscum Contagiosum",
+  "Scabies",
+  "Other (specify in notes)",
+];
+
+export default function AIDiagnosisAndDecisionPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [decision, setDecision] = useState<"accept" | "alter" | "deny" | null>(
+  const [caseData, setCaseData] = useState<CaseDetail | null>(null);
+  const [images, setImages] = useState<CaseImage[]>([]);
+  const [prediction, setPrediction] = useState<AIPrediction | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [aiDecision, setAiDecision] = useState<"accept" | "override" | null>(
     null
   );
-  const [selectedDiagnosis, setSelectedDiagnosis] =
-    useState("Malignant Melanoma");
-  const [reasoning, setReasoning] = useState("");
-  const [additionalNotes, setAdditionalNotes] = useState("");
+  const [finalDiagnosis, setFinalDiagnosis] = useState("");
+  const [customDiagnosis, setCustomDiagnosis] = useState("");
+  const [notes, setNotes] = useState("");
 
-  // Mock data
-  const aiAnalysis = {
-    primaryDiagnosis: "Malignant Melanoma",
-    confidence: 0.89,
-    modelVersion: "DermAI v3.2.1",
-    analysisDate: "2024-01-07 09:35",
+  // ── Lightbox ──────────────────────────────────────────────────────────────
+  const [lightbox, setLightbox] = useState(false);
+  const [lightboxIdx, setLightboxIdx] = useState(0);
 
-    differential: [
-      {
-        condition: "Malignant Melanoma",
-        probability: 0.89,
-        icd10: "C43.6",
-        description: "Malignant neoplasm of skin",
-      },
-      {
-        condition: "Atypical Nevus (Dysplastic Nevus)",
-        probability: 0.07,
-        icd10: "D22.6",
-        description: "Benign neoplasm, may progress to melanoma",
-      },
-      {
-        condition: "Seborrheic Keratosis",
-        probability: 0.03,
-        icd10: "L82.1",
-        description: "Benign skin growth",
-      },
-      {
-        condition: "Basal Cell Carcinoma",
-        probability: 0.01,
-        icd10: "C44.319",
-        description: "Most common skin cancer",
-      },
-    ],
+  // ── Fetch case ────────────────────────────────────────────────────────────
+  const fetchCase = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/dermatologists/cases/${id}`, {
+        headers: auth(),
+      });
+      if (res.status === 401) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setCaseData(data.case || null);
+      setImages(data.images || []);
+      setPrediction(data.prediction || null);
 
-    clinicalFeatures: [
-      {
-        feature: "Asymmetry",
-        present: true,
-        weight: "High",
-        description: "Lesion is asymmetrical in multiple axes",
-      },
-      {
-        feature: "Border Irregularity",
-        present: true,
-        weight: "High",
-        description: "Notched, irregular borders observed",
-      },
-      {
-        feature: "Color Variation",
-        present: true,
-        weight: "High",
-        description: "Multiple colors present: brown, black, red",
-      },
-      {
-        feature: "Diameter",
-        present: true,
-        weight: "Medium",
-        description: "Diameter 12-15mm (>6mm threshold)",
-      },
-      {
-        feature: "Evolution",
-        present: true,
-        weight: "High",
-        description: "Recent changes in size and color reported",
-      },
-    ],
+      // If already diagnosed, redirect to case review
+      if (data.diagnosis) {
+        navigate(`/dermatologist/case/${id}`, { replace: true });
+      }
+    } catch {
+      setError("Failed to load case. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
 
-    riskFactors: [
-      { factor: "Age > 40", present: true, impact: "High" },
-      { factor: "Male gender", present: true, impact: "Medium" },
-      {
-        factor: "Family history of melanoma",
-        present: true,
-        impact: "Very High",
-      },
-      { factor: "Fair skin type", present: true, impact: "High" },
-      { factor: "History of sunburns", present: true, impact: "Medium" },
-    ],
+  useEffect(() => {
+    fetchCase();
+  }, [fetchCase]);
 
-    recommendations: [
-      "Urgent biopsy recommended (excisional preferred)",
-      "Sentinel lymph node evaluation if melanoma confirmed",
-      "Full body skin examination",
-      "Genetic counseling due to family history",
-      "Patient education on sun protection",
-    ],
+  // ── When AI decision changes, pre-fill diagnosis ──────────────────────────
+  useEffect(() => {
+    if (aiDecision === "accept" && prediction) {
+      const label = prediction.predicted_label;
+      setFinalDiagnosis(label.charAt(0).toUpperCase() + label.slice(1));
+    } else if (aiDecision === "override") {
+      setFinalDiagnosis("");
+    }
+  }, [aiDecision, prediction]);
 
-    evidenceBase: [
-      {
-        source: "ABCDE Criteria Analysis",
-        finding: "5/5 criteria met",
-        reference: "American Academy of Dermatology Guidelines",
-      },
-      {
-        source: "Dermoscopic Pattern Analysis",
-        finding: "Irregular pigment network, blue-white veil",
-        reference: "7-point checklist score: 6/7",
-      },
-      {
-        source: "Risk Stratification",
-        finding: "High-risk profile",
-        reference: "Melanoma Risk Assessment Tool",
-      },
-    ],
+  // ── Submit diagnosis ──────────────────────────────────────────────────────
+  const handleSubmit = async () => {
+    const diagnosis =
+      finalDiagnosis === "Other (specify in notes)"
+        ? customDiagnosis.trim()
+        : finalDiagnosis.trim();
 
-    similarCases: [
-      {
-        id: "CS-2024-045",
-        similarity: 0.92,
-        finalDiagnosis: "Malignant Melanoma",
-        outcome: "Stage IIA, successful excision",
-        dermatologistNotes: "Similar presentation, biopsy confirmed",
-      },
-      {
-        id: "CS-2024-062",
-        similarity: 0.88,
-        finalDiagnosis: "Malignant Melanoma",
-        outcome: "Stage IB, wide local excision + sentinel node",
-        dermatologistNotes: "ABCDE criteria match, positive family history",
-      },
-      {
-        id: "CS-2023-198",
-        similarity: 0.85,
-        finalDiagnosis: "Atypical Nevus",
-        outcome: "Prophylactic excision, benign pathology",
-        dermatologistNotes: "Initially concerning but histology benign",
-      },
-    ],
+    if (!aiDecision) {
+      setError("Please accept or override the AI prediction first.");
+      return;
+    }
+    if (!diagnosis) {
+      setError("Please select or enter a final diagnosis.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/dermatologists/cases/${id}/diagnose`, {
+        method: "POST",
+        headers: { ...auth(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          final_diagnosis: diagnosis,
+          notes: notes.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.message || "Submission failed");
+      }
+      setSuccess(true);
+      setTimeout(() => navigate(`/dermatologist/treatment/${id}`), 1800);
+    } catch (err: any) {
+      setError(err.message || "Failed to submit diagnosis.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const commonDiagnoses = [
-    "Malignant Melanoma",
-    "Basal Cell Carcinoma",
-    "Squamous Cell Carcinoma",
-    "Atypical Nevus",
-    "Seborrheic Keratosis",
-    "Actinic Keratosis",
-    "Dermatofibroma",
-    "Hemangioma",
-    "Other (specify in notes)",
-  ];
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const calcAge = (dob: string | null) => {
+    if (!dob) return null;
+    return Math.floor((Date.now() - new Date(dob).getTime()) / 3.156e10);
+  };
 
-  const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 0.85) return "#10b981";
-    if (confidence >= 0.7) return "#f59e0b";
+  const confidenceColor = (score: number) => {
+    if (score >= 0.85) return "#059669";
+    if (score >= 0.7) return "#d97706";
     return "#ef4444";
   };
 
-  const handleSubmitDecision = () => {
-    if (!decision) {
-      alert("Please select a decision (Accept, Alter, or Deny)");
-      return;
-    }
-
-    if (decision === "alter" && !selectedDiagnosis) {
-      alert("Please select an alternative diagnosis");
-      return;
-    }
-
-    if (!reasoning.trim()) {
-      alert("Please provide your clinical reasoning");
-      return;
-    }
-
-    // In real app, submit to backend
-    console.log({
-      caseId,
-      decision,
-      selectedDiagnosis,
-      reasoning,
-      additionalNotes,
-    });
-
-    // Navigate to medication page
-    navigate(`/dermatologist/cases/${caseId}/medication`);
+  const confidenceBg = (score: number) => {
+    if (score >= 0.85) return "#d1fae5";
+    if (score >= 0.7) return "#fef3c7";
+    return "#fee2e2";
   };
 
-  const styles = {
-    container: {
-      maxWidth: "1400px",
-      margin: "0 auto",
-    },
-    header: {
-      backgroundColor: "#ffffff",
-      padding: "1.5rem",
-      borderRadius: "12px",
-      marginBottom: "1.5rem",
-      border: "1px solid #e2e8f0",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-    },
-    pageTitle: {
-      fontSize: "1.875rem",
-      fontWeight: "bold",
-      color: "#1e293b",
-      marginBottom: "0.5rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.75rem",
-    },
-    subtitle: {
-      color: "#64748b",
-      fontSize: "1rem",
-    },
-    mainGrid: {
-      display: "grid",
-      gridTemplateColumns: "2fr 1fr",
-      gap: "1.5rem",
-    },
-    section: {
-      backgroundColor: "#ffffff",
-      padding: "1.5rem",
-      borderRadius: "12px",
-      border: "1px solid #e2e8f0",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-      marginBottom: "1.5rem",
-    },
-    sectionTitle: {
-      fontSize: "1.125rem",
-      fontWeight: "bold",
-      color: "#1e293b",
-      marginBottom: "1rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-    },
-    aiCard: {
-      backgroundColor: "#f8fafc",
-      padding: "1.5rem",
-      borderRadius: "12px",
-      border: "2px solid #8b5cf6",
-      marginBottom: "1.5rem",
-    },
-    diagnosisText: {
-      fontSize: "1.5rem",
-      fontWeight: "bold",
-      color: "#1e293b",
-      marginBottom: "1rem",
-    },
-    confidenceDisplay: {
-      display: "flex",
-      alignItems: "center",
-      gap: "1rem",
-      marginBottom: "1rem",
-    },
-    confidenceBar: {
-      flex: 1,
-      height: "16px",
-      backgroundColor: "#e2e8f0",
-      borderRadius: "8px",
-      overflow: "hidden",
-    },
-    confidenceFill: {
-      height: "100%",
-      transition: "width 0.3s",
-    },
-    confidenceText: {
-      fontSize: "1.5rem",
-      fontWeight: "bold",
-      minWidth: "60px",
-    },
-    decisionButtons: {
-      display: "grid",
-      gridTemplateColumns: "repeat(3, 1fr)",
-      gap: "1rem",
-      marginBottom: "1.5rem",
-    },
-    decisionButton: {
-      padding: "1.5rem",
-      border: "2px solid #e2e8f0",
-      borderRadius: "12px",
-      cursor: "pointer",
-      transition: "all 0.2s",
-      textAlign: "center" as const,
-      backgroundColor: "#ffffff",
-    },
-    decisionButtonActive: {
-      border: "2px solid",
-      backgroundColor: "#f8fafc",
-    },
-    decisionIcon: {
-      marginBottom: "0.75rem",
-      display: "flex",
-      justifyContent: "center",
-    },
-    decisionLabel: {
-      fontSize: "1.125rem",
-      fontWeight: "600",
-      marginBottom: "0.5rem",
-    },
-    decisionDescription: {
-      fontSize: "0.875rem",
-      color: "#64748b",
-    },
-    differentialList: {
-      marginTop: "1rem",
-    },
-    differentialItem: {
-      padding: "1rem",
-      backgroundColor: "#f8fafc",
-      borderRadius: "8px",
-      marginBottom: "0.75rem",
-      border: "1px solid #e2e8f0",
-      cursor: "pointer",
-      transition: "all 0.2s",
-    },
-    differentialHeader: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: "0.5rem",
-    },
-    featureList: {
-      display: "grid",
-      gap: "0.75rem",
-    },
-    featureItem: {
-      padding: "1rem",
-      backgroundColor: "#f8fafc",
-      borderRadius: "8px",
-      border: "1px solid #e2e8f0",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-    },
-    featureInfo: {
-      flex: 1,
-    },
-    featureName: {
-      fontWeight: "600",
-      marginBottom: "0.25rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-    },
-    featureDescription: {
-      fontSize: "0.875rem",
-      color: "#64748b",
-    },
-    badge: {
-      display: "inline-block",
-      padding: "0.25rem 0.75rem",
-      borderRadius: "12px",
-      fontSize: "0.75rem",
-      fontWeight: "600",
-    },
-    formGroup: {
-      marginBottom: "1.5rem",
-    },
-    label: {
-      display: "block",
-      fontWeight: "600",
-      marginBottom: "0.5rem",
-      color: "#1e293b",
-    },
-    select: {
-      width: "100%",
-      padding: "0.75rem",
-      border: "1px solid #e2e8f0",
-      borderRadius: "8px",
-      fontSize: "1rem",
-      backgroundColor: "#ffffff",
-      cursor: "pointer",
-    },
-    textarea: {
-      width: "100%",
-      minHeight: "150px",
-      padding: "0.75rem",
-      border: "1px solid #e2e8f0",
-      borderRadius: "8px",
-      fontSize: "0.95rem",
-      fontFamily: "inherit",
-      resize: "vertical" as const,
-      boxSizing: "border-box" as const,
-    },
-    infoBox: {
-      backgroundColor: "#eff6ff",
-      border: "1px solid #bfdbfe",
-      borderRadius: "8px",
-      padding: "1rem",
-      display: "flex",
-      gap: "0.75rem",
-      fontSize: "0.875rem",
-      color: "#1e40af",
-      marginBottom: "1rem",
-    },
-    list: {
-      listStyle: "none",
-      padding: 0,
-      margin: 0,
-    },
-    listItem: {
-      padding: "0.75rem",
-      borderBottom: "1px solid #f1f5f9",
-      fontSize: "0.875rem",
-      display: "flex",
-      alignItems: "flex-start",
-      gap: "0.5rem",
-    },
-    caseCard: {
-      padding: "1rem",
-      backgroundColor: "#f8fafc",
-      borderRadius: "8px",
-      border: "1px solid #e2e8f0",
-      marginBottom: "0.75rem",
-      cursor: "pointer",
-      transition: "all 0.2s",
-    },
-    submitButton: {
-      width: "100%",
-      padding: "1.25rem",
-      backgroundColor: "#8b5cf6",
-      color: "#ffffff",
-      border: "none",
-      borderRadius: "12px",
-      cursor: "pointer",
-      fontSize: "1.125rem",
-      fontWeight: "600",
-      transition: "background-color 0.2s",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "0.75rem",
-    },
-  };
+  const imageUrl = (path: string) => `${IMG_URL}/${path.replace(/\\/g, "/")}`;
 
-  return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <h1 style={styles.pageTitle}>
-          <Brain size={32} color="#8b5cf6" />
-          AI Diagnosis Review
-        </h1>
-        <p style={styles.subtitle}>
-          Case {caseId} - Review and make your clinical decision
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={s.centered}>
+        <Activity size={36} style={{ color: "#3db5e6" }} />
+        <p style={{ color: "#64748b", marginTop: "1rem" }}>Loading case...</p>
+      </div>
+    );
+  }
+
+  if (error && !caseData) {
+    return (
+      <div style={s.centered}>
+        <AlertCircle size={36} style={{ color: "#ef4444" }} />
+        <p style={{ color: "#64748b", marginTop: "1rem" }}>{error}</p>
+        <button
+          style={s.backBtn}
+          onClick={() => navigate("/dermatologist/cases")}
+        >
+          <ArrowLeft size={14} /> Back to Queue
+        </button>
+      </div>
+    );
+  }
+
+  // ── Success screen ────────────────────────────────────────────────────────
+  if (success) {
+    return (
+      <div style={s.centered}>
+        <div style={s.successRing}>
+          <CheckCircle size={48} style={{ color: "#059669" }} />
+        </div>
+        <h2 style={s.successTitle}>Diagnosis Submitted</h2>
+        <p style={{ color: "#64748b", margin: "0.5rem 0 0" }}>
+          Redirecting to treatment plan...
         </p>
       </div>
+    );
+  }
 
-      <div style={styles.mainGrid}>
-        {/* Left Column - AI Analysis */}
-        <div>
-          {/* AI Diagnosis */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>
-              <Brain size={20} color="#8b5cf6" />
-              AI Primary Diagnosis
-            </h2>
+  const age = calcAge(caseData!.patient_dob);
 
-            <div style={styles.aiCard}>
-              <div style={styles.diagnosisText}>
-                {aiAnalysis.primaryDiagnosis}
-              </div>
-
-              <div style={styles.confidenceDisplay}>
-                <span
-                  style={{
-                    fontSize: "0.875rem",
-                    color: "#64748b",
-                    minWidth: "80px",
-                  }}
-                >
-                  Confidence:
-                </span>
-                <div style={styles.confidenceBar}>
-                  <div
-                    style={{
-                      ...styles.confidenceFill,
-                      width: `${aiAnalysis.confidence * 100}%`,
-                      backgroundColor: getConfidenceColor(
-                        aiAnalysis.confidence
-                      ),
-                    }}
-                  />
-                </div>
-                <div
-                  style={{
-                    ...styles.confidenceText,
-                    color: getConfidenceColor(aiAnalysis.confidence),
-                  }}
-                >
-                  {(aiAnalysis.confidence * 100).toFixed(0)}%
-                </div>
-              </div>
-
-              <div style={{ fontSize: "0.813rem", color: "#64748b" }}>
-                Model: {aiAnalysis.modelVersion} • Analyzed:{" "}
-                {aiAnalysis.analysisDate}
-              </div>
-            </div>
-
-            <div style={styles.infoBox}>
-              <Info size={20} />
-              <div>
-                This AI diagnosis is based on image analysis, clinical features,
-                and risk factors. Your expert clinical judgment is essential for
-                final diagnosis and treatment planning.
-              </div>
-            </div>
-          </div>
-
-          {/* Differential Diagnoses */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>
-              <FileText size={20} />
-              Differential Diagnoses
-            </h2>
-
-            <div style={styles.differentialList}>
-              {aiAnalysis.differential.map((item, index) => (
-                <div
-                  key={index}
-                  style={styles.differentialItem}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "#ffffff";
-                    e.currentTarget.style.borderColor = "#8b5cf6";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "#f8fafc";
-                    e.currentTarget.style.borderColor = "#e2e8f0";
-                  }}
-                >
-                  <div style={styles.differentialHeader}>
-                    <div>
-                      <div style={{ fontWeight: "600", fontSize: "1rem" }}>
-                        {item.condition}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "0.813rem",
-                          color: "#64748b",
-                          marginTop: "0.25rem",
-                        }}
-                      >
-                        ICD-10: {item.icd10}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "1.25rem",
-                        fontWeight: "bold",
-                        color: getConfidenceColor(item.probability),
-                      }}
-                    >
-                      {(item.probability * 100).toFixed(0)}%
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "0.875rem",
-                      color: "#64748b",
-                      marginTop: "0.5rem",
-                    }}
-                  >
-                    {item.description}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Clinical Features */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>
-              <TrendingUp size={20} />
-              Clinical Features (ABCDE Analysis)
-            </h2>
-
-            <div style={styles.featureList}>
-              {aiAnalysis.clinicalFeatures.map((feature, index) => (
-                <div key={index} style={styles.featureItem}>
-                  <div style={styles.featureInfo}>
-                    <div style={styles.featureName}>
-                      {feature.present ? (
-                        <CheckCircle size={18} color="#10b981" />
-                      ) : (
-                        <XCircle size={18} color="#64748b" />
-                      )}
-                      {feature.feature}
-                    </div>
-                    <div style={styles.featureDescription}>
-                      {feature.description}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      ...styles.badge,
-                      backgroundColor:
-                        feature.weight === "High"
-                          ? "#ef444415"
-                          : feature.weight === "Medium"
-                          ? "#f59e0b15"
-                          : "#10b98115",
-                      color:
-                        feature.weight === "High"
-                          ? "#ef4444"
-                          : feature.weight === "Medium"
-                          ? "#f59e0b"
-                          : "#10b981",
-                    }}
-                  >
-                    {feature.weight}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* AI Recommendations */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>
-              <AlertCircle size={20} color="#f59e0b" />
-              AI Recommendations
-            </h2>
-
-            <ul style={styles.list}>
-              {aiAnalysis.recommendations.map((rec, index) => (
-                <li key={index} style={styles.listItem}>
-                  <span style={{ color: "#f59e0b" }}>▸</span>
-                  <span>{rec}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+  return (
+    <div style={s.page}>
+      {/* ── Header ── */}
+      <div style={s.headerRow}>
+        <div style={s.headerLeft}>
+          <button
+            style={s.backBtn}
+            onClick={() => navigate(`/dermatologist/case/${id}`)}
+          >
+            <ArrowLeft size={14} /> Back to Case Review
+          </button>
+          <h1 style={s.pageTitle}>AI Diagnosis Review</h1>
+          <p style={s.pageSubtitle}>
+            Case #{id} · {caseData!.patient_name} · Review AI prediction and
+            submit your final diagnosis
+          </p>
         </div>
-
-        {/* Right Column - Decision Making */}
-        <div>
-          {/* Decision Panel */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Your Clinical Decision</h2>
-
-            <div style={styles.decisionButtons}>
-              {[
-                {
-                  type: "accept" as const,
-                  icon: CheckCircle,
-                  label: "Accept",
-                  description: "Agree with AI diagnosis",
-                  color: "#10b981",
-                },
-                {
-                  type: "alter" as const,
-                  icon: Edit3,
-                  label: "Alter",
-                  description: "Modify the diagnosis",
-                  color: "#f59e0b",
-                },
-                {
-                  type: "deny" as const,
-                  icon: XCircle,
-                  label: "Deny",
-                  description: "Disagree with AI",
-                  color: "#ef4444",
-                },
-              ].map((option) => {
-                const Icon = option.icon;
-                const isActive = decision === option.type;
-
-                return (
-                  <div
-                    key={option.type}
-                    style={{
-                      ...styles.decisionButton,
-                      ...(isActive
-                        ? {
-                            ...styles.decisionButtonActive,
-                            borderColor: option.color,
-                          }
-                        : {}),
-                    }}
-                    onClick={() => setDecision(option.type)}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.borderColor = option.color;
-                        e.currentTarget.style.transform = "translateY(-2px)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.borderColor = "#e2e8f0";
-                        e.currentTarget.style.transform = "translateY(0)";
-                      }
-                    }}
-                  >
-                    <div style={styles.decisionIcon}>
-                      <Icon
-                        size={32}
-                        color={isActive ? option.color : "#64748b"}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        ...styles.decisionLabel,
-                        color: isActive ? option.color : "#1e293b",
-                      }}
-                    >
-                      {option.label}
-                    </div>
-                    <div style={styles.decisionDescription}>
-                      {option.description}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {decision === "alter" && (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  Select Alternative Diagnosis *
-                </label>
-                <select
-                  style={styles.select}
-                  value={selectedDiagnosis}
-                  onChange={(e) => setSelectedDiagnosis(e.target.value)}
-                >
-                  {commonDiagnoses.map((diagnosis) => (
-                    <option key={diagnosis} value={diagnosis}>
-                      {diagnosis}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>
-                Clinical Reasoning *
-                <span
-                  style={{
-                    fontSize: "0.813rem",
-                    fontWeight: "normal",
-                    color: "#64748b",
-                    marginLeft: "0.5rem",
-                  }}
-                >
-                  (Required)
-                </span>
-              </label>
-              <textarea
-                style={styles.textarea}
-                placeholder="Provide your clinical reasoning for this decision. Include relevant clinical findings, differential considerations, and rationale..."
-                value={reasoning}
-                onChange={(e) => setReasoning(e.target.value)}
-              />
-            </div>
-
-            <div style={styles.formGroup}>
-              <label style={styles.label}>
-                Additional Notes
-                <span
-                  style={{
-                    fontSize: "0.813rem",
-                    fontWeight: "normal",
-                    color: "#64748b",
-                    marginLeft: "0.5rem",
-                  }}
-                >
-                  (Optional)
-                </span>
-              </label>
-              <textarea
-                style={styles.textarea}
-                placeholder="Add any additional observations, follow-up requirements, or special considerations..."
-                value={additionalNotes}
-                onChange={(e) => setAdditionalNotes(e.target.value)}
-              />
-            </div>
-
-            <button
-              style={styles.submitButton}
-              onClick={handleSubmitDecision}
-              disabled={!decision || !reasoning.trim()}
-              onMouseEnter={(e) => {
-                if (decision && reasoning.trim()) {
-                  e.currentTarget.style.backgroundColor = "#7c3aed";
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "#8b5cf6";
-              }}
-            >
-              Continue to Treatment Plan
-              <ArrowRight size={24} />
-            </button>
-          </div>
-
-          {/* Similar Cases */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Similar Cases in Database</h2>
-
-            {aiAnalysis.similarCases.map((caseItem, index) => (
-              <div
-                key={index}
-                style={styles.caseCard}
-                onClick={() => navigate(`/dermatologist/cases/${caseItem.id}`)}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = "#ffffff";
-                  e.currentTarget.style.borderColor = "#8b5cf6";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "#f8fafc";
-                  e.currentTarget.style.borderColor = "#e2e8f0";
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: "0.5rem",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: "monospace",
-                      fontWeight: "600",
-                      color: "#8b5cf6",
-                    }}
-                  >
-                    {caseItem.id}
-                  </span>
-                  <span
-                    style={{
-                      ...styles.badge,
-                      backgroundColor: "#10b98115",
-                      color: "#10b981",
-                    }}
-                  >
-                    {(caseItem.similarity * 100).toFixed(0)}% match
-                  </span>
-                </div>
-                <div style={{ fontWeight: "600", marginBottom: "0.25rem" }}>
-                  {caseItem.finalDiagnosis}
-                </div>
-                <div
-                  style={{
-                    fontSize: "0.813rem",
-                    color: "#64748b",
-                    marginBottom: "0.5rem",
-                  }}
-                >
-                  {caseItem.outcome}
-                </div>
-                <div
-                  style={{
-                    fontSize: "0.813rem",
-                    color: "#64748b",
-                    fontStyle: "italic",
-                  }}
-                >
-                  "{caseItem.dermatologistNotes}"
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Risk Factors */}
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Patient Risk Factors</h2>
-
-            <ul style={styles.list}>
-              {aiAnalysis.riskFactors.map((risk, index) => (
-                <li key={index} style={styles.listItem}>
-                  {risk.present ? (
-                    <CheckCircle size={16} color="#ef4444" />
-                  ) : (
-                    <XCircle size={16} color="#64748b" />
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <span>{risk.factor}</span>
-                    {risk.present && (
-                      <span
-                        style={{
-                          ...styles.badge,
-                          marginLeft: "0.5rem",
-                          backgroundColor: "#ef444415",
-                          color: "#ef4444",
-                        }}
-                      >
-                        {risk.impact} Risk
-                      </span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
+        <div style={s.stepBadge}>
+          <Brain size={14} />
+          Step 2 of 3 — Diagnosis
         </div>
       </div>
+
+      {/* ── Step progress bar ── */}
+      <div style={s.progressBar}>
+        {[
+          { n: 1, label: "Case Review", done: true, active: false },
+          { n: 2, label: "AI Diagnosis", done: false, active: true },
+          { n: 3, label: "Treatment Plan", done: false, active: false },
+        ].map((step, i) => (
+          <React.Fragment key={step.n}>
+            <div style={s.progressStep}>
+              <div
+                style={{
+                  ...s.progressDot,
+                  backgroundColor: step.done
+                    ? "#059669"
+                    : step.active
+                    ? "#3db5e6"
+                    : "#e5e7eb",
+                  color: step.done || step.active ? "#fff" : "#94a3b8",
+                }}
+              >
+                {step.done ? <CheckCircle size={12} /> : step.n}
+              </div>
+              <span
+                style={{
+                  ...s.progressLabel,
+                  color: step.active ? "#1e293b" : "#94a3b8",
+                  fontWeight: step.active ? 700 : 400,
+                }}
+              >
+                {step.label}
+              </span>
+            </div>
+            {i < 2 && (
+              <div
+                style={{
+                  ...s.progressLine,
+                  backgroundColor: step.done ? "#059669" : "#e5e7eb",
+                }}
+              />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* ── Main grid ── */}
+      <div style={s.twoCol}>
+        {/* ════ LEFT — Case snapshot + images ════════════════════════════ */}
+        <div style={s.leftCol}>
+          {/* Patient + case summary */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<User size={14} style={{ color: "#3db5e6" }} />}
+              title="Patient Summary"
+            />
+            <div style={s.patientHero}>
+              <div style={s.patientAvatar}>
+                {caseData!.patient_name
+                  .split(" ")
+                  .slice(0, 2)
+                  .map((n) => n[0])
+                  .join("")
+                  .toUpperCase()}
+              </div>
+              <div>
+                <div style={s.patientName}>{caseData!.patient_name}</div>
+                <div style={s.patientMeta}>
+                  {age ? `${age} yrs` : "Age unknown"}
+                  {caseData!.patient_sex
+                    ? ` · ${
+                        caseData!.patient_sex.charAt(0).toUpperCase() +
+                        caseData!.patient_sex.slice(1)
+                      }`
+                    : ""}
+                </div>
+              </div>
+            </div>
+            <InfoRow
+              label="Complaint"
+              value={caseData!.chief_complaint || "—"}
+            />
+            <InfoRow
+              label="Location"
+              value={caseData!.lesion_location || "—"}
+            />
+            <InfoRow
+              label="Duration"
+              value={caseData!.lesion_duration || "—"}
+            />
+            <InfoRow label="Clinician" value={caseData!.clinician_name} />
+            {caseData!.symptoms && (
+              <div style={s.textBlock}>
+                <div style={s.textBlockLabel}>Symptoms</div>
+                <div style={s.textBlockValue}>{caseData!.symptoms}</div>
+              </div>
+            )}
+            {caseData!.prior_treatment && (
+              <div style={s.textBlock}>
+                <div style={s.textBlockLabel}>Prior Treatment</div>
+                <div style={s.textBlockValue}>{caseData!.prior_treatment}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Lesion images */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<ImageIcon size={14} style={{ color: "#3db5e6" }} />}
+              title={`Lesion Images (${images.length})`}
+            />
+            {images.length === 0 ? (
+              <div style={s.emptyImages}>
+                <ImageIcon
+                  size={28}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
+                  style={{ color: "#9ca3af", fontSize: "0.825rem", margin: 0 }}
+                >
+                  No images uploaded
+                </p>
+              </div>
+            ) : (
+              <div style={s.imageGrid}>
+                {images.map((img, idx) => (
+                  <div
+                    key={img.id}
+                    style={s.imageWrap}
+                    onClick={() => {
+                      setLightboxIdx(idx);
+                      setLightbox(true);
+                    }}
+                    onMouseEnter={(e) => {
+                      const ov = e.currentTarget.querySelector(
+                        ".ov"
+                      ) as HTMLElement;
+                      if (ov) ov.style.opacity = "1";
+                    }}
+                    onMouseLeave={(e) => {
+                      const ov = e.currentTarget.querySelector(
+                        ".ov"
+                      ) as HTMLElement;
+                      if (ov) ov.style.opacity = "0";
+                    }}
+                  >
+                    <img
+                      src={imageUrl(img.file_path)}
+                      alt={`Lesion ${idx + 1}`}
+                      style={s.image}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23f1f5f9'/%3E%3C/svg%3E";
+                      }}
+                    />
+                    <div className="ov" style={s.imageOverlay}>
+                      <ZoomIn size={18} style={{ color: "#fff" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ════ RIGHT — AI result + diagnosis form ════════════════════════ */}
+        <div style={s.rightCol}>
+          {/* AI prediction card */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<Brain size={14} style={{ color: "#8b5cf6" }} />}
+              title="AI Model Prediction"
+            />
+
+            {prediction ? (
+              <>
+                {/* Prediction hero */}
+                <div style={s.predHero}>
+                  <div
+                    style={{
+                      ...s.predPill,
+                      backgroundColor: confidenceBg(
+                        prediction.confidence_score
+                      ),
+                      color: confidenceColor(prediction.confidence_score),
+                    }}
+                  >
+                    {prediction.predicted_label.charAt(0).toUpperCase() +
+                      prediction.predicted_label.slice(1)}
+                  </div>
+
+                  {/* Confidence bar */}
+                  <div style={s.confBarWrap}>
+                    <div style={s.confBarRow}>
+                      <span style={s.confLabel}>Confidence</span>
+                      <span
+                        style={{
+                          ...s.confValue,
+                          color: confidenceColor(prediction.confidence_score),
+                        }}
+                      >
+                        {(prediction.confidence_score * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div style={s.confBarBg}>
+                      <div
+                        style={{
+                          ...s.confBarFill,
+                          width: `${prediction.confidence_score * 100}%`,
+                          backgroundColor: confidenceColor(
+                            prediction.confidence_score
+                          ),
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={s.modelMeta}>
+                  <span>Model: {prediction.model_version}</span>
+                  <span>·</span>
+                  <span>
+                    Generated:{" "}
+                    {new Date(prediction.created_at).toLocaleDateString(
+                      "en-GH",
+                      { day: "numeric", month: "short", year: "numeric" }
+                    )}
+                  </span>
+                </div>
+
+                <div style={s.aiDisclaimer}>
+                  <AlertTriangle
+                    size={13}
+                    style={{ color: "#d97706", flexShrink: 0 }}
+                  />
+                  <span>
+                    AI predictions are decision-support tools. Your expert
+                    clinical judgement takes final precedence.
+                  </span>
+                </div>
+
+                {/* Accept / Override decision */}
+                <div style={s.decisionRow}>
+                  <button
+                    style={{
+                      ...s.decisionBtn,
+                      ...(aiDecision === "accept"
+                        ? s.decisionAcceptActive
+                        : s.decisionAccept),
+                    }}
+                    onClick={() => setAiDecision("accept")}
+                  >
+                    <ThumbsUp size={16} />
+                    Accept AI Prediction
+                  </button>
+                  <button
+                    style={{
+                      ...s.decisionBtn,
+                      ...(aiDecision === "override"
+                        ? s.decisionOverrideActive
+                        : s.decisionOverride),
+                    }}
+                    onClick={() => setAiDecision("override")}
+                  >
+                    <ThumbsDown size={16} />
+                    Override Prediction
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={s.emptyImages}>
+                <Brain
+                  size={28}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
+                  style={{
+                    color: "#9ca3af",
+                    fontSize: "0.825rem",
+                    margin: "0 0 1rem",
+                  }}
+                >
+                  No AI prediction available — enter diagnosis manually
+                </p>
+                <button
+                  style={{ ...s.decisionBtn, ...s.decisionOverride }}
+                  onClick={() => setAiDecision("override")}
+                >
+                  Enter Diagnosis Manually
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Diagnosis form — shows after decision is made */}
+          {aiDecision && (
+            <div style={s.card}>
+              <SectionHead
+                icon={<Eye size={14} style={{ color: "#059669" }} />}
+                title="Final Diagnosis"
+              />
+
+              {/* Accepted — show pre-filled, still editable */}
+              {aiDecision === "accept" && (
+                <div style={s.acceptedBox}>
+                  <CheckCircle
+                    size={16}
+                    style={{ color: "#059669", flexShrink: 0 }}
+                  />
+                  <span
+                    style={{
+                      fontSize: "0.875rem",
+                      color: "#065f46",
+                      fontWeight: 600,
+                    }}
+                  >
+                    AI prediction accepted:{" "}
+                    <strong>
+                      {prediction!.predicted_label.charAt(0).toUpperCase() +
+                        prediction!.predicted_label.slice(1)}
+                    </strong>
+                  </span>
+                </div>
+              )}
+
+              {/* Override — show dropdown */}
+              {aiDecision === "override" && (
+                <div style={s.formGroup}>
+                  <label style={s.formLabel}>Select Final Diagnosis *</label>
+                  <select
+                    style={s.select}
+                    value={finalDiagnosis}
+                    onChange={(e) => setFinalDiagnosis(e.target.value)}
+                  >
+                    <option value="">— Choose diagnosis —</option>
+                    {DIAGNOSIS_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Custom entry if "Other" selected */}
+              {aiDecision === "override" &&
+                finalDiagnosis === "Other (specify in notes)" && (
+                  <div style={s.formGroup}>
+                    <label style={s.formLabel}>Specify Diagnosis *</label>
+                    <input
+                      style={s.input}
+                      placeholder="Enter diagnosis..."
+                      value={customDiagnosis}
+                      onChange={(e) => setCustomDiagnosis(e.target.value)}
+                    />
+                  </div>
+                )}
+
+              {/* Clinical notes */}
+              <div style={s.formGroup}>
+                <label style={s.formLabel}>
+                  Clinical Notes{" "}
+                  <span style={{ color: "#94a3b8", fontWeight: 400 }}>
+                    (optional)
+                  </span>
+                </label>
+                <textarea
+                  style={s.textarea}
+                  rows={4}
+                  placeholder="Add your clinical observations, reasoning, or additional context..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+
+              {/* Error */}
+              {error && (
+                <div style={s.errorBanner}>
+                  <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                  {error}
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                style={{
+                  ...s.submitBtn,
+                  opacity: submitting ? 0.7 : 1,
+                  cursor: submitting ? "not-allowed" : "pointer",
+                }}
+                onClick={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <>
+                    <Activity size={16} />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={16} />
+                    Submit Diagnosis & Continue
+                    <ChevronRight size={14} />
+                  </>
+                )}
+              </button>
+              <p style={s.submitNote}>
+                After submitting, you will be taken to write the treatment plan.
+                The clinician will be notified automatically.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Lightbox ── */}
+      {lightbox && images.length > 0 && (
+        <div style={s.lightboxOverlay} onClick={() => setLightbox(false)}>
+          <button style={s.lightboxClose} onClick={() => setLightbox(false)}>
+            <X size={20} />
+          </button>
+          <button
+            style={{ ...s.lightboxNav, left: "1.5rem" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIdx((i) => (i - 1 + images.length) % images.length);
+            }}
+          >
+            ‹
+          </button>
+          <img
+            src={imageUrl(images[lightboxIdx].file_path)}
+            alt={`Image ${lightboxIdx + 1}`}
+            style={s.lightboxImg}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            style={{ ...s.lightboxNav, right: "1.5rem" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIdx((i) => (i + 1) % images.length);
+            }}
+          >
+            ›
+          </button>
+          <div style={s.lightboxCounter}>
+            {lightboxIdx + 1} / {images.length}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+function SectionHead({
+  icon,
+  title,
+}: {
+  icon: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div style={s.sectionHead}>
+      {icon}
+      <h3 style={s.sectionTitle}>{title}</h3>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={s.infoRow}>
+      <span style={s.infoLabel}>{label}</span>
+      <span style={s.infoValue}>{value}</span>
+    </div>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s: Record<string, React.CSSProperties> = {
+  page: { maxWidth: "1200px", margin: "0 auto" },
+  centered: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "60vh",
+    gap: "0.5rem",
+  },
+
+  // Header
+  headerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginBottom: "1.5rem",
+    flexWrap: "wrap",
+    gap: "1rem",
+  },
+  headerLeft: { display: "flex", flexDirection: "column", gap: "0.3rem" },
+  backBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    background: "none",
+    border: "none",
+    color: "#64748b",
+    fontSize: "0.825rem",
+    cursor: "pointer",
+    padding: 0,
+  },
+  pageTitle: {
+    fontSize: "clamp(1.4rem, 3vw, 1.875rem)",
+    fontWeight: 800,
+    margin: 0,
+    background: "linear-gradient(135deg, #1e293b 0%, #3db5e6 100%)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+  pageSubtitle: {
+    fontSize: "0.875rem",
+    color: "#64748b",
+    margin: 0,
+    maxWidth: "520px",
+  },
+  stepBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.5rem 1rem",
+    backgroundColor: "#ede9fe",
+    borderRadius: "10px",
+    border: "1px solid #ddd6fe",
+    color: "#6d28d9",
+    fontSize: "0.8rem",
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+
+  // Progress
+  progressBar: {
+    display: "flex",
+    alignItems: "center",
+    marginBottom: "2rem",
+    backgroundColor: "#ffffff",
+    borderRadius: "14px",
+    padding: "1rem 1.5rem",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+  },
+  progressStep: { display: "flex", alignItems: "center", gap: "0.6rem" },
+  progressDot: {
+    width: "28px",
+    height: "28px",
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "0.75rem",
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  progressLabel: { fontSize: "0.825rem", whiteSpace: "nowrap" as const },
+  progressLine: {
+    flex: 1,
+    height: "2px",
+    margin: "0 0.75rem",
+    minWidth: "40px",
+  },
+
+  // Layout
+  twoCol: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1.1fr",
+    gap: "1.5rem",
+    alignItems: "start",
+  },
+  leftCol: { display: "flex", flexDirection: "column", gap: "1.25rem" },
+  rightCol: { display: "flex", flexDirection: "column", gap: "1.25rem" },
+
+  // Card
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: "16px",
+    border: "1px solid #e5e7eb",
+    padding: "1.25rem 1.5rem",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+  },
+  sectionHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginBottom: "1rem",
+  },
+  sectionTitle: {
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    color: "#374151",
+    margin: 0,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.06em",
+  },
+
+  // Patient
+  patientHero: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.875rem",
+    marginBottom: "1rem",
+    padding: "0.75rem",
+    backgroundColor: "#f8fafc",
+    borderRadius: "10px",
+  },
+  patientAvatar: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    flexShrink: 0,
+    background: "linear-gradient(135deg, #3db5e6 0%, #1e40af 100%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#ffffff",
+    fontWeight: 700,
+    fontSize: "0.8rem",
+  },
+  patientName: { fontSize: "0.9rem", fontWeight: 700, color: "#111827" },
+  patientMeta: { fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.1rem" },
+
+  infoRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "1rem",
+    padding: "0.4rem 0",
+    borderBottom: "1px solid #f8fafc",
+  },
+  infoLabel: {
+    fontSize: "0.72rem",
+    color: "#94a3b8",
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+    flexShrink: 0,
+  },
+  infoValue: {
+    fontSize: "0.82rem",
+    color: "#111827",
+    fontWeight: 500,
+    textAlign: "right" as const,
+  },
+
+  textBlock: { marginTop: "0.875rem" },
+  textBlockLabel: {
+    fontSize: "0.68rem",
+    fontWeight: 700,
+    color: "#94a3b8",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    marginBottom: "0.25rem",
+  },
+  textBlockValue: { fontSize: "0.875rem", color: "#374151", lineHeight: 1.6 },
+
+  // Images
+  emptyImages: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: "2rem 1rem",
+    textAlign: "center" as const,
+  },
+  imageGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "0.6rem",
+  },
+  imageWrap: {
+    position: "relative" as const,
+    borderRadius: "8px",
+    overflow: "hidden",
+    cursor: "pointer",
+    aspectRatio: "1",
+    backgroundColor: "#f1f5f9",
+  },
+  image: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover" as const,
+    display: "block",
+  },
+  imageOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0,
+    transition: "opacity 0.2s",
+  },
+
+  // AI prediction
+  predHero: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1.25rem",
+    marginBottom: "0.75rem",
+    flexWrap: "wrap" as const,
+  },
+  predPill: {
+    display: "inline-block",
+    padding: "0.45rem 1.25rem",
+    borderRadius: "20px",
+    fontWeight: 800,
+    fontSize: "1.05rem",
+  },
+  confBarWrap: { flex: 1, minWidth: "160px" },
+  confBarRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: "0.35rem",
+  },
+  confLabel: { fontSize: "0.72rem", color: "#94a3b8", fontWeight: 600 },
+  confValue: { fontSize: "0.82rem", fontWeight: 800 },
+  confBarBg: {
+    height: "8px",
+    backgroundColor: "#f1f5f9",
+    borderRadius: "4px",
+    overflow: "hidden",
+  },
+  confBarFill: {
+    height: "100%",
+    borderRadius: "4px",
+    transition: "width 0.6s ease",
+  },
+  modelMeta: {
+    display: "flex",
+    gap: "0.5rem",
+    fontSize: "0.72rem",
+    color: "#94a3b8",
+    marginBottom: "0.75rem",
+  },
+  aiDisclaimer: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "0.5rem",
+    backgroundColor: "#fffbeb",
+    border: "1px solid #fde68a",
+    borderRadius: "8px",
+    padding: "0.65rem 0.875rem",
+    fontSize: "0.75rem",
+    color: "#92400e",
+    lineHeight: 1.5,
+    marginBottom: "1rem",
+  },
+
+  // Decision buttons
+  decisionRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "0.75rem",
+    marginTop: "0.5rem",
+  },
+  decisionBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.5rem",
+    padding: "0.75rem",
+    borderRadius: "12px",
+    fontWeight: 700,
+    fontSize: "0.825rem",
+    cursor: "pointer",
+    border: "2px solid",
+    transition: "all 0.2s",
+  },
+  decisionAccept: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#86efac",
+    color: "#166534",
+  },
+  decisionAcceptActive: {
+    backgroundColor: "#059669",
+    borderColor: "#059669",
+    color: "#ffffff",
+    boxShadow: "0 4px 12px rgba(5,150,105,0.3)",
+  },
+  decisionOverride: {
+    backgroundColor: "#fff7ed",
+    borderColor: "#fdba74",
+    color: "#9a3412",
+  },
+  decisionOverrideActive: {
+    backgroundColor: "#ea580c",
+    borderColor: "#ea580c",
+    color: "#ffffff",
+    boxShadow: "0 4px 12px rgba(234,88,12,0.3)",
+  },
+
+  // Form
+  acceptedBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    backgroundColor: "#f0fdf4",
+    border: "1px solid #86efac",
+    borderRadius: "10px",
+    padding: "0.875rem 1rem",
+    marginBottom: "1rem",
+  },
+  formGroup: { marginBottom: "1rem" },
+  formLabel: {
+    display: "block",
+    fontSize: "0.78rem",
+    fontWeight: 700,
+    color: "#374151",
+    marginBottom: "0.4rem",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+  },
+  select: {
+    width: "100%",
+    padding: "0.65rem 0.875rem",
+    border: "1.5px solid #e5e7eb",
+    borderRadius: "10px",
+    fontSize: "0.875rem",
+    color: "#374151",
+    backgroundColor: "#f8fafc",
+    outline: "none",
+    cursor: "pointer",
+    boxSizing: "border-box" as const,
+  },
+  input: {
+    width: "100%",
+    padding: "0.65rem 0.875rem",
+    border: "1.5px solid #e5e7eb",
+    borderRadius: "10px",
+    fontSize: "0.875rem",
+    color: "#374151",
+    backgroundColor: "#f8fafc",
+    outline: "none",
+    boxSizing: "border-box" as const,
+  },
+  textarea: {
+    width: "100%",
+    padding: "0.75rem 0.875rem",
+    border: "1.5px solid #e5e7eb",
+    borderRadius: "10px",
+    fontSize: "0.875rem",
+    color: "#374151",
+    backgroundColor: "#f8fafc",
+    outline: "none",
+    resize: "vertical" as const,
+    fontFamily: "inherit",
+    boxSizing: "border-box" as const,
+    lineHeight: 1.6,
+  },
+
+  errorBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    backgroundColor: "#fee2e2",
+    color: "#dc2626",
+    padding: "0.75rem 1rem",
+    borderRadius: "10px",
+    fontSize: "0.825rem",
+    marginBottom: "1rem",
+  },
+
+  submitBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.5rem",
+    width: "100%",
+    padding: "0.875rem",
+    background: "linear-gradient(135deg, #059669 0%, #047857 100%)",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "12px",
+    fontWeight: 700,
+    fontSize: "0.9rem",
+    transition: "all 0.2s",
+  },
+  submitNote: {
+    fontSize: "0.75rem",
+    color: "#94a3b8",
+    textAlign: "center" as const,
+    margin: "0.75rem 0 0",
+    lineHeight: 1.5,
+  },
+
+  // Success
+  successRing: {
+    width: "80px",
+    height: "80px",
+    borderRadius: "50%",
+    backgroundColor: "#d1fae5",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: "1rem",
+  },
+  successTitle: {
+    fontSize: "1.5rem",
+    fontWeight: 800,
+    color: "#111827",
+    margin: 0,
+  },
+
+  // Lightbox
+  lightboxOverlay: {
+    position: "fixed" as const,
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.92)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+    cursor: "pointer",
+  },
+  lightboxImg: {
+    maxWidth: "85vw",
+    maxHeight: "85vh",
+    objectFit: "contain" as const,
+    borderRadius: "12px",
+    cursor: "default",
+  },
+  lightboxClose: {
+    position: "absolute" as const,
+    top: "1.25rem",
+    right: "1.25rem",
+    background: "rgba(255,255,255,0.15)",
+    border: "none",
+    borderRadius: "50%",
+    width: "40px",
+    height: "40px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#fff",
+    cursor: "pointer",
+    zIndex: 1001,
+  },
+  lightboxNav: {
+    position: "absolute" as const,
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "rgba(255,255,255,0.15)",
+    border: "none",
+    borderRadius: "50%",
+    width: "44px",
+    height: "44px",
+    color: "#fff",
+    fontSize: "1.5rem",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1001,
+  },
+  lightboxCounter: {
+    position: "absolute" as const,
+    bottom: "1.5rem",
+    left: "50%",
+    transform: "translateX(-50%)",
+    color: "#fff",
+    fontSize: "0.875rem",
+    fontWeight: 600,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    padding: "0.3rem 0.875rem",
+    borderRadius: "20px",
+  },
+};

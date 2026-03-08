@@ -1,798 +1,1142 @@
-import React, { useState } from "react";
+// src/Components/Dermatologist/CaseReviewPage.tsx
+import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  User,
-  Calendar,
-  Activity,
-  FileText,
-  Image,
-  ZoomIn,
-  ZoomOut,
-  RotateCw,
-  Download,
   Brain,
+  ChevronRight,
+  Clock,
+  Eye,
+  FileText,
+  ImageIcon,
+  Stethoscope,
+  User,
+  Activity,
+  AlertCircle,
   CheckCircle,
-  XCircle,
-  Edit3,
+  ZoomIn,
+  X,
+  Calendar,
+  MapPin,
+  Pill,
+  ClipboardList,
 } from "lucide-react";
 
-export default function DermatologistCaseReview() {
-  const [selectedImage, setSelectedImage] = useState(0);
-  const [imageZoom, setImageZoom] = useState(100);
+const API = "http://localhost:5001/api";
+const IMG_URL = "http://localhost:5001";
+const token = () => localStorage.getItem("token") ?? "";
+const auth = () => ({ Authorization: `Bearer ${token()}` });
 
-  // Mock data
-  const caseData = {
-    id: "CS-2024-001",
-    status: "Pending Review",
-    priority: "High",
-    patient: {
-      name: "Kwame Mensah",
-      age: 45,
-      gender: "Male",
-      phone: "+233 24 123 4567",
-      dateOfBirth: "1979-03-15",
-    },
-    submittedBy: "Dr. Sarah Johnson",
-    submittedDate: "2024-01-07 14:30",
-    caseInfo: {
-      chiefComplaint:
-        "Dark lesion on left arm that has been growing over the past 3 months",
-      symptoms:
-        "Irregular borders, color variation from brown to black, occasional itching",
-      duration: "3 months",
-      location: "Left upper arm, lateral aspect",
-      size: "Approximately 8mm x 6mm",
-      preliminaryDiagnosis: "Suspected Melanoma",
-    },
-    medicalHistory: {
-      chronicConditions: "Hypertension (controlled)",
-      familyHistory: "Father had skin cancer (basal cell carcinoma) at age 62",
-      allergies: "No known drug allergies",
-      currentMedications: "Lisinopril 10mg daily",
-    },
-    vitals: {
-      bloodPressure: "130/85 mmHg",
-      heartRate: "78 bpm",
-      temperature: "36.8°C",
-      weight: "82 kg",
-      height: "175 cm",
-    },
-    lesionDetails: {
-      location: "Left upper arm, lateral aspect",
-      size: "8mm x 6mm",
-      color: "Mixed: brown, black, with areas of red",
-      texture: "Raised, irregular surface",
-      duration: "3 months",
-      painLevel: "2/10",
-      itching: true,
-      bleeding: false,
-    },
-    aiAnalysis: {
-      diagnosis: "Melanoma",
-      confidence: 92,
-      differential: [
-        { condition: "Melanoma", probability: 92 },
-        { condition: "Dysplastic Nevus", probability: 6 },
-        { condition: "Seborrheic Keratosis", probability: 2 },
-      ],
-      abcdScore: {
-        asymmetry: "Present (2 points)",
-        border: "Irregular (2 points)",
-        color: "Multiple colors (2 points)",
-        diameter: "> 6mm (1 point)",
-        totalScore: "7/8 - High suspicion",
-      },
-    },
-    images: [
-      {
-        id: 1,
-        name: "lesion_closeup_1.jpg",
-        type: "Close-up",
-        date: "2024-01-07",
-      },
-      {
-        id: 2,
-        name: "lesion_wide_angle.jpg",
-        type: "Wide angle",
-        date: "2024-01-07",
-      },
-      {
-        id: 3,
-        name: "lesion_dermoscopy.jpg",
-        type: "Dermoscopy",
-        date: "2024-01-07",
-      },
-    ],
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface CaseDetail {
+  case_id: number;
+  patient_id: number;
+  patient_name: string;
+  patient_dob: string | null;
+  patient_sex: string | null;
+  patient_contact: string | null;
+  chief_complaint: string;
+  lesion_location: string;
+  lesion_type: string | null;
+  lesion_duration: string | null;
+  symptoms: string | null;
+  prior_treatment: string | null;
+  image_count: number;
+  status: string;
+  created_at: string;
+  clinician_name: string;
+  vitals_json: any;
+}
+
+interface CaseImage {
+  id: number;
+  file_path: string;
+}
+
+interface AIPrediction {
+  predicted_label: string;
+  confidence_score: number;
+  model_version: string;
+  created_at: string;
+}
+
+interface Diagnosis {
+  diagnosis_id: number;
+  final_diagnosis: string;
+  notes: string | null;
+  approved_at: string;
+  dermatologist_name: string;
+}
+
+interface Treatment {
+  treatment_id: number;
+  medications: string;
+  lifestyle_advice: string | null;
+  follow_up_instructions: string | null;
+  generated_by: string;
+}
+
+export default function CaseReviewPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const [caseData, setCaseData] = useState<CaseDetail | null>(null);
+  const [images, setImages] = useState<CaseImage[]>([]);
+  const [prediction, setPrediction] = useState<AIPrediction | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
+  const [treatment, setTreatment] = useState<Treatment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // ── Lightbox ──────────────────────────────────────────────────────────────
+  const [lightbox, setLightbox] = useState(false);
+  const [lightboxIdx, setLightboxIdx] = useState(0);
+
+  // ── Fetch case ────────────────────────────────────────────────────────────
+  const fetchCase = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/dermatologists/cases/${id}`, {
+        headers: auth(),
+      });
+      if (res.status === 401) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setCaseData(data.case || null);
+      setImages(data.images || []);
+      setPrediction(data.prediction || null);
+      setDiagnosis(data.diagnosis || null);
+      setTreatment(data.treatment || null);
+    } catch {
+      setError("Failed to load case details.");
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchCase();
+  }, [fetchCase]);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const calcAge = (dob: string | null) => {
+    if (!dob) return null;
+    return Math.floor((Date.now() - new Date(dob).getTime()) / 3.156e10);
   };
 
-  const styles = {
-    container: {
-      minHeight: "100vh",
-      backgroundColor: "#f8fafc",
-      fontFamily:
-        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    },
-    header: {
-      backgroundColor: "#ffffff",
-      borderBottom: "1px solid #e2e8f0",
-      padding: "1rem 2rem",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-    },
-    logo: {
-      fontSize: "1.5rem",
-      fontWeight: "bold",
-    },
-    backButton: {
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-      padding: "0.5rem 1rem",
-      backgroundColor: "transparent",
-      border: "1px solid #e2e8f0",
-      borderRadius: "8px",
-      cursor: "pointer",
-      color: "#64748b",
-      fontSize: "0.9rem",
-      fontWeight: "500",
-      transition: "all 0.2s",
-    },
-    mainContent: {
-      padding: "2rem",
-      maxWidth: "1600px",
-      margin: "0 auto",
-    },
-    pageHeader: {
-      backgroundColor: "#ffffff",
-      borderRadius: "12px",
-      padding: "1.5rem 2rem",
-      marginBottom: "2rem",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-      border: "1px solid #e2e8f0",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    caseId: {
-      fontFamily: "monospace",
-      fontSize: "1.5rem",
-      fontWeight: "bold",
-      color: "#3db5e6",
-      marginBottom: "0.25rem",
-    },
-    patientName: {
-      fontSize: "1.125rem",
-      color: "#1e293b",
-    },
-    priorityBadge: {
-      padding: "0.5rem 1rem",
-      borderRadius: "20px",
-      fontSize: "0.875rem",
-      fontWeight: "600",
-    },
-    contentGrid: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: "2rem",
-    },
-    section: {
-      backgroundColor: "#ffffff",
-      borderRadius: "12px",
-      padding: "1.5rem",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-      border: "1px solid #e2e8f0",
-      marginBottom: "2rem",
-    },
-    sectionTitle: {
-      fontSize: "1.125rem",
-      fontWeight: "bold",
-      color: "#1e293b",
-      marginBottom: "1rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-    },
-    imageViewer: {
-      backgroundColor: "#1e293b",
-      borderRadius: "8px",
-      padding: "1rem",
-      marginBottom: "1rem",
-      minHeight: "400px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      position: "relative",
-    },
-    imagePlaceholder: {
-      color: "#94a3b8",
-      textAlign: "center",
-    },
-    imageControls: {
-      display: "flex",
-      gap: "0.5rem",
-      justifyContent: "center",
-      marginBottom: "1rem",
-    },
-    controlButton: {
-      padding: "0.5rem",
-      backgroundColor: "#f8fafc",
-      border: "1px solid #e2e8f0",
-      borderRadius: "6px",
-      cursor: "pointer",
-      transition: "all 0.2s",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-    },
-    thumbnails: {
-      display: "flex",
-      gap: "1rem",
-      overflowX: "auto",
-    },
-    thumbnail: {
-      minWidth: "100px",
-      height: "100px",
-      backgroundColor: "#e2e8f0",
-      borderRadius: "8px",
-      cursor: "pointer",
-      border: "2px solid transparent",
-      transition: "border-color 0.2s",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#94a3b8",
-    },
-    activeThumbnail: {
-      borderColor: "#3db5e6",
-    },
-    infoGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(2, 1fr)",
-      gap: "1rem",
-    },
-    infoCard: {
-      backgroundColor: "#f8fafc",
-      padding: "1rem",
-      borderRadius: "8px",
-      border: "1px solid #e2e8f0",
-    },
-    label: {
-      fontSize: "0.813rem",
-      color: "#64748b",
-      marginBottom: "0.25rem",
-      fontWeight: "500",
-    },
-    value: {
-      fontSize: "0.95rem",
-      color: "#1e293b",
-      fontWeight: "600",
-    },
-    textBlock: {
-      backgroundColor: "#f8fafc",
-      padding: "1rem",
-      borderRadius: "8px",
-      border: "1px solid #e2e8f0",
-      color: "#334155",
-      fontSize: "0.95rem",
-      lineHeight: "1.6",
-      marginBottom: "1rem",
-    },
-    aiSection: {
-      backgroundColor: "#f0f9ff",
-      border: "2px solid #3db5e6",
-      borderRadius: "12px",
-      padding: "1.5rem",
-    },
-    aiHeader: {
-      display: "flex",
-      alignItems: "center",
-      gap: "0.75rem",
-      marginBottom: "1rem",
-    },
-    aiTitle: {
-      fontSize: "1.125rem",
-      fontWeight: "bold",
-      color: "#0369a1",
-    },
-    confidenceBar: {
-      marginBottom: "1.5rem",
-    },
-    confidenceLabel: {
-      display: "flex",
-      justifyContent: "space-between",
-      marginBottom: "0.5rem",
-      fontSize: "0.875rem",
-    },
-    progressBar: {
-      width: "100%",
-      height: "12px",
-      backgroundColor: "#e0f2fe",
-      borderRadius: "6px",
-      overflow: "hidden",
-    },
-    progress: {
-      height: "100%",
-      backgroundColor: "#3db5e6",
-      transition: "width 0.3s",
-    },
-    differentialList: {
-      marginBottom: "1.5rem",
-    },
-    differentialItem: {
-      display: "flex",
-      justifyContent: "space-between",
-      padding: "0.75rem",
-      backgroundColor: "#ffffff",
-      borderRadius: "6px",
-      marginBottom: "0.5rem",
-    },
-    abcdGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(2, 1fr)",
-      gap: "0.75rem",
-    },
-    abcdItem: {
-      backgroundColor: "#ffffff",
-      padding: "0.75rem",
-      borderRadius: "6px",
-    },
-    abcdLabel: {
-      fontSize: "0.813rem",
-      fontWeight: "600",
-      color: "#0369a1",
-      marginBottom: "0.25rem",
-    },
-    abcdValue: {
-      fontSize: "0.875rem",
-      color: "#334155",
-    },
-    actionButtons: {
-      display: "grid",
-      gridTemplateColumns: "repeat(3, 1fr)",
-      gap: "1rem",
-      marginTop: "2rem",
-    },
-    actionButton: {
-      padding: "1rem",
-      border: "none",
-      borderRadius: "8px",
-      cursor: "pointer",
-      fontSize: "0.95rem",
-      fontWeight: "600",
-      transition: "all 0.2s",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      gap: "0.5rem",
-    },
-    acceptButton: {
-      backgroundColor: "#10b981",
-      color: "#ffffff",
-    },
-    alterButton: {
-      backgroundColor: "#f59e0b",
-      color: "#ffffff",
-    },
-    denyButton: {
-      backgroundColor: "#ef4444",
-      color: "#ffffff",
-    },
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-GH", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-GH", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const confidenceColor = (score: number) => {
+    if (score >= 0.85) return "#059669";
+    if (score >= 0.7) return "#d97706";
+    return "#ef4444";
   };
+
+  const confidenceBg = (score: number) => {
+    if (score >= 0.85) return "#d1fae5";
+    if (score >= 0.7) return "#fef3c7";
+    return "#fee2e2";
+  };
+
+  const imageUrl = (path: string) => `${IMG_URL}/${path.replace(/\\/g, "/")}`;
+
+  const vitals = caseData?.vitals_json
+    ? typeof caseData.vitals_json === "string"
+      ? JSON.parse(caseData.vitals_json)
+      : caseData.vitals_json
+    : null;
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={s.loadingContainer}>
+        <Activity size={36} style={{ color: "#3db5e6" }} />
+        <p style={{ color: "#64748b", marginTop: "1rem" }}>Loading case...</p>
+      </div>
+    );
+  }
+
+  if (error || !caseData) {
+    return (
+      <div style={s.loadingContainer}>
+        <AlertCircle size={36} style={{ color: "#ef4444" }} />
+        <p style={{ color: "#64748b", marginTop: "1rem" }}>
+          {error || "Case not found"}
+        </p>
+        <button
+          style={s.backBtn}
+          onClick={() => navigate("/dermatologist/cases")}
+        >
+          <ArrowLeft size={14} /> Back to Queue
+        </button>
+      </div>
+    );
+  }
+
+  const age = calcAge(caseData.patient_dob);
+  const isReviewed = !!diagnosis;
+  const hasTreatment = !!treatment;
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <div style={styles.logo}>
-          <span style={{ color: "#3db5e6" }}>Akoma</span>
-          <span style={{ color: "#000" }}>Derma</span>
+    <div style={s.page}>
+      {/* ── Page header ── */}
+      <div style={s.headerRow}>
+        <div style={s.headerLeft}>
+          <button
+            style={s.backBtn}
+            onClick={() => navigate("/dermatologist/cases")}
+          >
+            <ArrowLeft size={14} /> Back to Queue
+          </button>
+          <h1 style={s.pageTitle}>Case Review</h1>
+          <p style={s.pageSubtitle}>
+            Case #{caseData.case_id} · {caseData.patient_name}
+          </p>
         </div>
-        <button
-          style={styles.backButton}
-          onClick={() => alert("Navigate back to dashboard")}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = "#f8fafc";
-            e.currentTarget.style.borderColor = "#3db5e6";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.borderColor = "#e2e8f0";
-          }}
-        >
-          <ArrowLeft size={18} />
-          Back to Dashboard
-        </button>
-      </header>
 
-      <main style={styles.mainContent}>
-        {/* Page Header */}
-        <div style={styles.pageHeader}>
-          <div>
-            <div style={styles.caseId}>{caseData.id}</div>
-            <div style={styles.patientName}>
-              {caseData.patient.name}, {caseData.patient.age} •{" "}
-              {caseData.patient.gender}
-            </div>
-          </div>
+        {/* Status + action */}
+        <div style={s.headerActions}>
           <div
             style={{
-              ...styles.priorityBadge,
-              backgroundColor: "#fee2e2",
-              color: "#ef4444",
+              ...s.statusChip,
+              backgroundColor: isReviewed ? "#d1fae5" : "#fee2e2",
+              color: isReviewed ? "#065f46" : "#991b1b",
+              borderColor: isReviewed ? "#6ee7b7" : "#fca5a5",
             }}
           >
-            High Priority
+            {isReviewed ? <CheckCircle size={13} /> : <Clock size={13} />}
+            {isReviewed ? "Reviewed" : "Pending Review"}
           </div>
+
+          {/* CTA based on workflow stage */}
+          {!isReviewed && (
+            <button
+              style={s.primaryBtn}
+              onClick={() =>
+                navigate(`/dermatologist/diagnosis/${caseData.case_id}`)
+              }
+            >
+              <Brain size={15} />
+              Review AI & Diagnose
+              <ChevronRight size={14} />
+            </button>
+          )}
+          {isReviewed && !hasTreatment && (
+            <button
+              style={s.primaryBtn}
+              onClick={() =>
+                navigate(`/dermatologist/treatment/${caseData.case_id}`)
+              }
+            >
+              <Pill size={15} />
+              Write Treatment Plan
+              <ChevronRight size={14} />
+            </button>
+          )}
+          {isReviewed && hasTreatment && (
+            <div style={s.completedChip}>
+              <CheckCircle size={13} />
+              Treatment Plan Done
+            </div>
+          )}
         </div>
+      </div>
 
-        <div style={styles.contentGrid}>
-          {/* Left Column - Images */}
-          <div>
-            <div style={styles.section}>
-              <h3 style={styles.sectionTitle}>
-                <Image size={20} color="#3db5e6" />
-                Lesion Images
-              </h3>
-
-              <div style={styles.imageViewer}>
-                <div style={styles.imagePlaceholder}>
-                  <Image size={64} />
-                  <p style={{ marginTop: "1rem" }}>
-                    {caseData.images[selectedImage].type}
-                  </p>
-                  <p style={{ fontSize: "0.875rem", marginTop: "0.5rem" }}>
-                    {caseData.images[selectedImage].name}
-                  </p>
+      {/* ── Three column layout ── */}
+      <div style={s.threeCol}>
+        {/* ════ LEFT — Patient & case info ════════════════════════════════ */}
+        <div style={s.leftCol}>
+          {/* Patient card */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<User size={14} style={{ color: "#3db5e6" }} />}
+              title="Patient Information"
+            />
+            <div style={s.patientHero}>
+              <div style={s.patientAvatar}>
+                {caseData.patient_name
+                  .split(" ")
+                  .slice(0, 2)
+                  .map((n) => n[0])
+                  .join("")
+                  .toUpperCase()}
+              </div>
+              <div>
+                <div style={s.patientName}>{caseData.patient_name}</div>
+                <div style={s.patientMeta}>
+                  {age ? `${age} years old` : "Age unknown"}
+                  {caseData.patient_sex
+                    ? ` · ${
+                        caseData.patient_sex.charAt(0).toUpperCase() +
+                        caseData.patient_sex.slice(1)
+                      }`
+                    : ""}
                 </div>
               </div>
+            </div>
+            <InfoRow label="Contact" value={caseData.patient_contact || "—"} />
+            <InfoRow
+              label="Date of Birth"
+              value={
+                caseData.patient_dob ? formatDate(caseData.patient_dob) : "—"
+              }
+            />
+          </div>
 
-              <div style={styles.imageControls}>
-                <button
-                  style={styles.controlButton}
-                  onClick={() => setImageZoom(Math.max(50, imageZoom - 25))}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#e2e8f0")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#f8fafc")
-                  }
-                >
-                  <ZoomOut size={18} />
-                </button>
-                <button
-                  style={styles.controlButton}
-                  onClick={() => setImageZoom(100)}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#e2e8f0")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#f8fafc")
-                  }
-                >
-                  {imageZoom}%
-                </button>
-                <button
-                  style={styles.controlButton}
-                  onClick={() => setImageZoom(Math.min(200, imageZoom + 25))}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#e2e8f0")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#f8fafc")
-                  }
-                >
-                  <ZoomIn size={18} />
-                </button>
-                <button
-                  style={styles.controlButton}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#e2e8f0")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#f8fafc")
-                  }
-                >
-                  <RotateCw size={18} />
-                </button>
-                <button
-                  style={styles.controlButton}
-                  onClick={() => alert("Download image")}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#e2e8f0")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.backgroundColor = "#f8fafc")
-                  }
-                >
-                  <Download size={18} />
-                </button>
+          {/* Case details card */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<ClipboardList size={14} style={{ color: "#8b5cf6" }} />}
+              title="Case Details"
+            />
+            <InfoRow label="Case ID" value={`#${caseData.case_id}`} />
+            <InfoRow
+              label="Submitted"
+              value={`${formatDate(caseData.created_at)} at ${formatTime(
+                caseData.created_at
+              )}`}
+            />
+            <InfoRow label="Clinician" value={caseData.clinician_name} />
+            <InfoRow
+              label="Complaint"
+              value={caseData.chief_complaint || "—"}
+            />
+            <InfoRow label="Duration" value={caseData.lesion_duration || "—"} />
+            <InfoRow label="Location" value={caseData.lesion_location || "—"} />
+            <InfoRow label="Lesion Type" value={caseData.lesion_type || "—"} />
+          </div>
+
+          {/* Symptoms card */}
+          {(caseData.symptoms || caseData.prior_treatment) && (
+            <div style={s.card}>
+              <SectionHead
+                icon={<Stethoscope size={14} style={{ color: "#059669" }} />}
+                title="Clinical History"
+              />
+              {caseData.symptoms && (
+                <div style={s.textBlock}>
+                  <div style={s.textBlockLabel}>Symptoms</div>
+                  <div style={s.textBlockValue}>{caseData.symptoms}</div>
+                </div>
+              )}
+              {caseData.prior_treatment && (
+                <div style={s.textBlock}>
+                  <div style={s.textBlockLabel}>Prior Treatment</div>
+                  <div style={s.textBlockValue}>{caseData.prior_treatment}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Vitals */}
+          {vitals && Object.keys(vitals).length > 0 && (
+            <div style={s.card}>
+              <SectionHead
+                icon={<Activity size={14} style={{ color: "#ef4444" }} />}
+                title="Vitals"
+              />
+              <div style={s.vitalsGrid}>
+                {vitals.bp && (
+                  <div style={s.vitalItem}>
+                    <div style={s.vitalLabel}>Blood Pressure</div>
+                    <div style={s.vitalValue}>{vitals.bp}</div>
+                  </div>
+                )}
+                {vitals.temp && (
+                  <div style={s.vitalItem}>
+                    <div style={s.vitalLabel}>Temperature</div>
+                    <div style={s.vitalValue}>{vitals.temp}</div>
+                  </div>
+                )}
+                {vitals.weight && (
+                  <div style={s.vitalItem}>
+                    <div style={s.vitalLabel}>Weight</div>
+                    <div style={s.vitalValue}>{vitals.weight}</div>
+                  </div>
+                )}
+                {vitals.pulse && (
+                  <div style={s.vitalItem}>
+                    <div style={s.vitalLabel}>Pulse</div>
+                    <div style={s.vitalValue}>{vitals.pulse}</div>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
+        </div>
 
-              <div style={styles.thumbnails}>
-                {caseData.images.map((img, index) => (
+        {/* ════ MIDDLE — Images ════════════════════════════════════════════ */}
+        <div style={s.middleCol}>
+          <div style={s.card}>
+            <SectionHead
+              icon={<ImageIcon size={14} style={{ color: "#3db5e6" }} />}
+              title={`Lesion Images (${images.length})`}
+            />
+
+            {images.length === 0 ? (
+              <div style={s.noImages}>
+                <ImageIcon
+                  size={32}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
+                  style={{ color: "#9ca3af", fontSize: "0.875rem", margin: 0 }}
+                >
+                  No images uploaded for this case
+                </p>
+              </div>
+            ) : (
+              <div style={s.imageGrid}>
+                {images.map((img, idx) => (
                   <div
                     key={img.id}
-                    style={{
-                      ...styles.thumbnail,
-                      ...(selectedImage === index
-                        ? styles.activeThumbnail
-                        : {}),
+                    style={s.imageWrap}
+                    onClick={() => {
+                      setLightboxIdx(idx);
+                      setLightbox(true);
                     }}
-                    onClick={() => setSelectedImage(index)}
+                    onMouseEnter={(e) => {
+                      const overlay = e.currentTarget.querySelector(
+                        ".img-overlay"
+                      ) as HTMLElement;
+                      if (overlay) overlay.style.opacity = "1";
+                    }}
+                    onMouseLeave={(e) => {
+                      const overlay = e.currentTarget.querySelector(
+                        ".img-overlay"
+                      ) as HTMLElement;
+                      if (overlay) overlay.style.opacity = "0";
+                    }}
                   >
-                    <div style={{ textAlign: "center", fontSize: "0.75rem" }}>
-                      <Image size={32} />
-                      <div style={{ marginTop: "0.25rem" }}>{img.type}</div>
+                    <img
+                      src={imageUrl(img.file_path)}
+                      alt={`Lesion ${idx + 1}`}
+                      style={s.image}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23f1f5f9'/%3E%3C/svg%3E";
+                      }}
+                    />
+                    <div className="img-overlay" style={s.imageOverlay}>
+                      <ZoomIn size={20} style={{ color: "#fff" }} />
                     </div>
+                    <div style={s.imageLabel}>Image {idx + 1}</div>
                   </div>
                 ))}
               </div>
-            </div>
-
-            {/* Lesion Details */}
-            <div style={styles.section}>
-              <h3 style={styles.sectionTitle}>
-                <FileText size={20} color="#3db5e6" />
-                Lesion Details
-              </h3>
-              <div style={styles.infoGrid}>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Location</div>
-                  <div style={styles.value}>
-                    {caseData.lesionDetails.location}
-                  </div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Size</div>
-                  <div style={styles.value}>{caseData.lesionDetails.size}</div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Color</div>
-                  <div style={styles.value}>{caseData.lesionDetails.color}</div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Texture</div>
-                  <div style={styles.value}>
-                    {caseData.lesionDetails.texture}
-                  </div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Duration</div>
-                  <div style={styles.value}>
-                    {caseData.lesionDetails.duration}
-                  </div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Pain Level</div>
-                  <div style={styles.value}>
-                    {caseData.lesionDetails.painLevel}
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Right Column - Details */}
-          <div>
-            {/* AI Analysis */}
-            <div style={styles.aiSection}>
-              <div style={styles.aiHeader}>
-                <Brain size={24} color="#0369a1" />
-                <div style={styles.aiTitle}>AI Analysis</div>
-              </div>
-
-              <div style={styles.confidenceBar}>
-                <div style={styles.confidenceLabel}>
-                  <span style={{ fontWeight: "600", color: "#0369a1" }}>
-                    Diagnosis: {caseData.aiAnalysis.diagnosis}
-                  </span>
-                  <span style={{ fontWeight: "600", color: "#0369a1" }}>
-                    {caseData.aiAnalysis.confidence}%
-                  </span>
+          {/* AI Prediction card */}
+          {prediction && (
+            <div style={s.card}>
+              <SectionHead
+                icon={<Brain size={14} style={{ color: "#8b5cf6" }} />}
+                title="AI Prediction"
+              />
+              <div style={s.aiHero}>
+                <div
+                  style={{
+                    ...s.aiPredPill,
+                    backgroundColor: confidenceBg(prediction.confidence_score),
+                    color: confidenceColor(prediction.confidence_score),
+                  }}
+                >
+                  {prediction.predicted_label.charAt(0).toUpperCase() +
+                    prediction.predicted_label.slice(1)}
                 </div>
-                <div style={styles.progressBar}>
-                  <div
-                    style={{
-                      ...styles.progress,
-                      width: `${caseData.aiAnalysis.confidence}%`,
-                    }}
+                <div
+                  style={{
+                    ...s.aiConfidence,
+                    color: confidenceColor(prediction.confidence_score),
+                  }}
+                >
+                  {(prediction.confidence_score * 100).toFixed(1)}% confidence
+                </div>
+              </div>
+              <div style={s.aiMeta}>
+                <span>Model: {prediction.model_version}</span>
+                <span>·</span>
+                <span>{formatDate(prediction.created_at)}</span>
+              </div>
+              <div style={s.aiNote}>
+                <AlertCircle
+                  size={13}
+                  style={{ color: "#d97706", flexShrink: 0 }}
+                />
+                <span>
+                  AI predictions assist clinical decision-making and should be
+                  verified by a certified dermatologist before finalising.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {!prediction && (
+            <div style={s.card}>
+              <SectionHead
+                icon={<Brain size={14} style={{ color: "#94a3b8" }} />}
+                title="AI Prediction"
+              />
+              <div style={s.noImages}>
+                <Brain
+                  size={28}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
+                  style={{ color: "#9ca3af", fontSize: "0.875rem", margin: 0 }}
+                >
+                  No AI prediction available for this case
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ════ RIGHT — Diagnosis & treatment ═════════════════════════════ */}
+        <div style={s.rightCol}>
+          {/* Diagnosis result */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<Eye size={14} style={{ color: "#059669" }} />}
+              title="Dermatologist Diagnosis"
+            />
+            {isReviewed ? (
+              <>
+                <div style={s.diagnosisPill}>
+                  {diagnosis!.final_diagnosis.charAt(0).toUpperCase() +
+                    diagnosis!.final_diagnosis.slice(1)}
+                </div>
+                <div style={{ marginTop: "1rem" }}>
+                  <InfoRow
+                    label="Reviewed by"
+                    value={diagnosis!.dermatologist_name}
+                  />
+                  <InfoRow
+                    label="Date"
+                    value={formatDate(diagnosis!.approved_at)}
                   />
                 </div>
-              </div>
-
-              <div style={styles.differentialList}>
-                <div
+                {diagnosis!.notes && (
+                  <div style={s.textBlock}>
+                    <div style={s.textBlockLabel}>Clinical Notes</div>
+                    <div style={s.textBlockValue}>{diagnosis!.notes}</div>
+                  </div>
+                )}
+                {!hasTreatment && (
+                  <button
+                    style={s.outlineBtn}
+                    onClick={() =>
+                      navigate(`/dermatologist/treatment/${caseData.case_id}`)
+                    }
+                  >
+                    <Pill size={14} />
+                    Write Treatment Plan
+                  </button>
+                )}
+              </>
+            ) : (
+              <div style={s.pendingBox}>
+                <Clock
+                  size={28}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
                   style={{
+                    color: "#9ca3af",
                     fontSize: "0.875rem",
-                    fontWeight: "600",
-                    color: "#0369a1",
-                    marginBottom: "0.75rem",
+                    margin: "0 0 1rem",
                   }}
                 >
-                  Differential Diagnosis:
-                </div>
-                {caseData.aiAnalysis.differential.map((item, index) => (
-                  <div key={index} style={styles.differentialItem}>
-                    <span>{item.condition}</span>
-                    <span style={{ fontWeight: "600", color: "#0369a1" }}>
-                      {item.probability}%
-                    </span>
-                  </div>
-                ))}
+                  Diagnosis not yet submitted
+                </p>
+                <button
+                  style={s.primaryBtn}
+                  onClick={() =>
+                    navigate(`/dermatologist/diagnosis/${caseData.case_id}`)
+                  }
+                >
+                  <Brain size={14} />
+                  Start Diagnosis Review
+                </button>
               </div>
+            )}
+          </div>
 
-              <div>
+          {/* Treatment plan */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<Pill size={14} style={{ color: "#d97706" }} />}
+              title="Treatment Plan"
+            />
+            {hasTreatment ? (
+              <>
+                <div style={s.textBlock}>
+                  <div style={s.textBlockLabel}>Medications</div>
+                  <div style={s.textBlockValue}>{treatment!.medications}</div>
+                </div>
+                {treatment!.lifestyle_advice && (
+                  <div style={s.textBlock}>
+                    <div style={s.textBlockLabel}>Lifestyle Advice</div>
+                    <div style={s.textBlockValue}>
+                      {treatment!.lifestyle_advice}
+                    </div>
+                  </div>
+                )}
+                {treatment!.follow_up_instructions && (
+                  <div style={s.textBlock}>
+                    <div style={s.textBlockLabel}>Follow-up Instructions</div>
+                    <div style={s.textBlockValue}>
+                      {treatment!.follow_up_instructions}
+                    </div>
+                  </div>
+                )}
+                <div style={s.generatedByBadge}>
+                  {treatment!.generated_by === "llm"
+                    ? "🤖 AI Generated"
+                    : "✍️ Dermatologist Written"}
+                </div>
+              </>
+            ) : (
+              <div style={s.pendingBox}>
+                <Pill
+                  size={28}
+                  style={{ color: "#d1d5db", marginBottom: "0.5rem" }}
+                />
+                <p
+                  style={{ color: "#9ca3af", fontSize: "0.875rem", margin: 0 }}
+                >
+                  {isReviewed
+                    ? "Diagnosis submitted — treatment plan not yet written"
+                    : "Complete diagnosis first before writing a treatment plan"}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Workflow tracker */}
+          <div style={s.card}>
+            <SectionHead
+              icon={<FileText size={14} style={{ color: "#94a3b8" }} />}
+              title="Case Workflow"
+            />
+            {[
+              { label: "Case submitted by clinician", done: true },
+              { label: "AI prediction generated", done: !!prediction },
+              { label: "Dermatologist diagnosis", done: isReviewed },
+              { label: "Treatment plan written", done: hasTreatment },
+              { label: "Clinician notified", done: hasTreatment },
+            ].map((step, i) => (
+              <div key={i} style={s.workflowStep}>
                 <div
                   style={{
-                    fontSize: "0.875rem",
-                    fontWeight: "600",
-                    color: "#0369a1",
-                    marginBottom: "0.75rem",
+                    ...s.workflowDot,
+                    backgroundColor: step.done ? "#059669" : "#e5e7eb",
+                    borderColor: step.done ? "#059669" : "#d1d5db",
                   }}
                 >
-                  ABCD Score:
+                  {step.done && (
+                    <CheckCircle size={10} style={{ color: "#fff" }} />
+                  )}
                 </div>
-                <div style={styles.abcdGrid}>
-                  <div style={styles.abcdItem}>
-                    <div style={styles.abcdLabel}>Asymmetry</div>
-                    <div style={styles.abcdValue}>
-                      {caseData.aiAnalysis.abcdScore.asymmetry}
-                    </div>
-                  </div>
-                  <div style={styles.abcdItem}>
-                    <div style={styles.abcdLabel}>Border</div>
-                    <div style={styles.abcdValue}>
-                      {caseData.aiAnalysis.abcdScore.border}
-                    </div>
-                  </div>
-                  <div style={styles.abcdItem}>
-                    <div style={styles.abcdLabel}>Color</div>
-                    <div style={styles.abcdValue}>
-                      {caseData.aiAnalysis.abcdScore.color}
-                    </div>
-                  </div>
-                  <div style={styles.abcdItem}>
-                    <div style={styles.abcdLabel}>Diameter</div>
-                    <div style={styles.abcdValue}>
-                      {caseData.aiAnalysis.abcdScore.diameter}
-                    </div>
-                  </div>
-                </div>
-                <div
+                <span
                   style={{
-                    marginTop: "0.75rem",
-                    padding: "0.75rem",
-                    backgroundColor: "#fee2e2",
-                    borderRadius: "6px",
-                    color: "#991b1b",
-                    fontWeight: "600",
-                    fontSize: "0.875rem",
-                    textAlign: "center",
+                    ...s.workflowLabel,
+                    color: step.done ? "#111827" : "#94a3b8",
+                    fontWeight: step.done ? 600 : 400,
                   }}
                 >
-                  {caseData.aiAnalysis.abcdScore.totalScore}
-                </div>
+                  {step.label}
+                </span>
               </div>
-            </div>
-
-            {/* Case Information */}
-            <div style={styles.section}>
-              <h3 style={styles.sectionTitle}>
-                <FileText size={20} color="#3db5e6" />
-                Case Information
-              </h3>
-              <div style={{ marginBottom: "1rem" }}>
-                <div style={styles.label}>Chief Complaint</div>
-                <div style={styles.textBlock}>
-                  {caseData.caseInfo.chiefComplaint}
-                </div>
-              </div>
-              <div style={{ marginBottom: "1rem" }}>
-                <div style={styles.label}>Symptoms</div>
-                <div style={styles.textBlock}>{caseData.caseInfo.symptoms}</div>
-              </div>
-            </div>
-
-            {/* Patient Vitals */}
-            <div style={styles.section}>
-              <h3 style={styles.sectionTitle}>
-                <Activity size={20} color="#3db5e6" />
-                Vital Signs
-              </h3>
-              <div style={styles.infoGrid}>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Blood Pressure</div>
-                  <div style={styles.value}>
-                    {caseData.vitals.bloodPressure}
-                  </div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Heart Rate</div>
-                  <div style={styles.value}>{caseData.vitals.heartRate}</div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Temperature</div>
-                  <div style={styles.value}>{caseData.vitals.temperature}</div>
-                </div>
-                <div style={styles.infoCard}>
-                  <div style={styles.label}>Weight</div>
-                  <div style={styles.value}>{caseData.vitals.weight}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Medical History */}
-            <div style={styles.section}>
-              <h3 style={styles.sectionTitle}>
-                <User size={20} color="#3db5e6" />
-                Medical History
-              </h3>
-              <div style={{ marginBottom: "1rem" }}>
-                <div style={styles.label}>Chronic Conditions</div>
-                <div style={styles.textBlock}>
-                  {caseData.medicalHistory.chronicConditions}
-                </div>
-              </div>
-              <div style={{ marginBottom: "1rem" }}>
-                <div style={styles.label}>Family History</div>
-                <div style={styles.textBlock}>
-                  {caseData.medicalHistory.familyHistory}
-                </div>
-              </div>
-              <div>
-                <div style={styles.label}>Allergies</div>
-                <div style={styles.textBlock}>
-                  {caseData.medicalHistory.allergies}
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
+      </div>
 
-        {/* Action Buttons */}
-        <div style={styles.actionButtons}>
-          <button
-            style={{ ...styles.actionButton, ...styles.acceptButton }}
-            onClick={() => alert("Accept AI diagnosis")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#059669")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#10b981")
-            }
-          >
-            <CheckCircle size={24} />
-            Accept AI Diagnosis
+      {/* ── Lightbox ── */}
+      {lightbox && images.length > 0 && (
+        <div style={s.lightboxOverlay} onClick={() => setLightbox(false)}>
+          <button style={s.lightboxClose} onClick={() => setLightbox(false)}>
+            <X size={20} />
           </button>
           <button
-            style={{ ...styles.actionButton, ...styles.alterButton }}
-            onClick={() => alert("Alter diagnosis")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#d97706")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#f59e0b")
-            }
+            style={{ ...s.lightboxNav, left: "1rem" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIdx((i) => (i - 1 + images.length) % images.length);
+            }}
           >
-            <Edit3 size={24} />
-            Alter Diagnosis
+            ‹
           </button>
+          <img
+            src={imageUrl(images[lightboxIdx].file_path)}
+            alt={`Image ${lightboxIdx + 1}`}
+            style={s.lightboxImg}
+            onClick={(e) => e.stopPropagation()}
+          />
           <button
-            style={{ ...styles.actionButton, ...styles.denyButton }}
-            onClick={() => alert("Deny and provide new diagnosis")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#dc2626")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#ef4444")
-            }
+            style={{ ...s.lightboxNav, right: "1rem" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxIdx((i) => (i + 1) % images.length);
+            }}
           >
-            <XCircle size={24} />
-            Deny & Provide New
+            ›
           </button>
+          <div style={s.lightboxCounter}>
+            {lightboxIdx + 1} / {images.length}
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+function SectionHead({
+  icon,
+  title,
+}: {
+  icon: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div style={s.sectionHead}>
+      {icon}
+      <h3 style={s.sectionTitle}>{title}</h3>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={s.infoRow}>
+      <span style={s.infoLabel}>{label}</span>
+      <span style={s.infoValue}>{value}</span>
+    </div>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s: Record<string, React.CSSProperties> = {
+  page: { maxWidth: "1300px", margin: "0 auto" },
+  loadingContainer: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "60vh",
+  },
+
+  // Header
+  headerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginBottom: "1.75rem",
+    flexWrap: "wrap",
+    gap: "1rem",
+  },
+  headerLeft: { display: "flex", flexDirection: "column", gap: "0.3rem" },
+  backBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+    background: "none",
+    border: "none",
+    color: "#64748b",
+    fontSize: "0.825rem",
+    cursor: "pointer",
+    padding: 0,
+    marginBottom: "0.25rem",
+  },
+  pageTitle: {
+    fontSize: "clamp(1.4rem, 3vw, 1.875rem)",
+    fontWeight: 800,
+    margin: 0,
+    background: "linear-gradient(135deg, #1e293b 0%, #3db5e6 100%)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  },
+  pageSubtitle: { fontSize: "0.875rem", color: "#64748b", margin: 0 },
+  headerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    flexWrap: "wrap",
+  },
+
+  statusChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    padding: "0.4rem 0.875rem",
+    borderRadius: "20px",
+    border: "1px solid",
+    fontSize: "0.8rem",
+    fontWeight: 600,
+  },
+  primaryBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.6rem 1.25rem",
+    background: "linear-gradient(135deg, #3db5e6 0%, #1e88d4 100%)",
+    color: "#fff",
+    border: "none",
+    borderRadius: "10px",
+    fontWeight: 700,
+    fontSize: "0.875rem",
+    cursor: "pointer",
+  },
+  outlineBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.5rem",
+    width: "100%",
+    padding: "0.65rem",
+    border: "1.5px solid #3db5e6",
+    borderRadius: "10px",
+    backgroundColor: "#f0f9ff",
+    color: "#0369a1",
+    fontWeight: 600,
+    fontSize: "0.875rem",
+    cursor: "pointer",
+    marginTop: "1rem",
+  },
+  completedChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    padding: "0.4rem 0.875rem",
+    borderRadius: "20px",
+    backgroundColor: "#d1fae5",
+    border: "1px solid #6ee7b7",
+    color: "#065f46",
+    fontSize: "0.8rem",
+    fontWeight: 600,
+  },
+
+  // Layout
+  threeCol: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1.2fr 1fr",
+    gap: "1.5rem",
+    alignItems: "start",
+  },
+  leftCol: { display: "flex", flexDirection: "column", gap: "1.25rem" },
+  middleCol: { display: "flex", flexDirection: "column", gap: "1.25rem" },
+  rightCol: { display: "flex", flexDirection: "column", gap: "1.25rem" },
+
+  // Card
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: "16px",
+    border: "1px solid #e5e7eb",
+    padding: "1.25rem 1.5rem",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+  },
+  sectionHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginBottom: "1rem",
+  },
+  sectionTitle: {
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    color: "#374151",
+    margin: 0,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+
+  // Patient
+  patientHero: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.875rem",
+    marginBottom: "1rem",
+    padding: "0.875rem",
+    backgroundColor: "#f8fafc",
+    borderRadius: "12px",
+  },
+  patientAvatar: {
+    width: "44px",
+    height: "44px",
+    borderRadius: "50%",
+    flexShrink: 0,
+    background: "linear-gradient(135deg, #3db5e6 0%, #1e40af 100%)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#ffffff",
+    fontWeight: 700,
+    fontSize: "0.875rem",
+  },
+  patientName: { fontSize: "0.95rem", fontWeight: 700, color: "#111827" },
+  patientMeta: { fontSize: "0.775rem", color: "#94a3b8", marginTop: "0.1rem" },
+
+  infoRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "1rem",
+    padding: "0.45rem 0",
+    borderBottom: "1px solid #f8fafc",
+  },
+  infoLabel: {
+    fontSize: "0.72rem",
+    color: "#94a3b8",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    flexShrink: 0,
+  },
+  infoValue: {
+    fontSize: "0.825rem",
+    color: "#111827",
+    fontWeight: 500,
+    textAlign: "right",
+  },
+
+  textBlock: { marginBottom: "0.875rem" },
+  textBlockLabel: {
+    fontSize: "0.68rem",
+    fontWeight: 700,
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: "0.25rem",
+  },
+  textBlockValue: { fontSize: "0.875rem", color: "#374151", lineHeight: 1.6 },
+
+  vitalsGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "0.75rem",
+  },
+  vitalItem: {
+    backgroundColor: "#f8fafc",
+    borderRadius: "10px",
+    padding: "0.75rem",
+    border: "1px solid #e5e7eb",
+  },
+  vitalLabel: {
+    fontSize: "0.65rem",
+    fontWeight: 700,
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: "0.2rem",
+  },
+  vitalValue: { fontSize: "1rem", fontWeight: 700, color: "#111827" },
+
+  // Images
+  noImages: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "2.5rem 1rem",
+    textAlign: "center",
+  },
+  imageGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: "0.75rem",
+  },
+  imageWrap: {
+    position: "relative",
+    borderRadius: "10px",
+    overflow: "hidden",
+    cursor: "pointer",
+    aspectRatio: "1",
+    backgroundColor: "#f1f5f9",
+  },
+  image: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  imageOverlay: {
+    position: "absolute",
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0,
+    transition: "opacity 0.2s",
+  },
+  imageLabel: {
+    position: "absolute",
+    bottom: "0.4rem",
+    left: "0.5rem",
+    fontSize: "0.65rem",
+    color: "#fff",
+    fontWeight: 600,
+    textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+  },
+
+  // AI
+  aiHero: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    marginBottom: "0.75rem",
+  },
+  aiPredPill: {
+    display: "inline-block",
+    padding: "0.4rem 1.25rem",
+    borderRadius: "20px",
+    fontWeight: 800,
+    fontSize: "1rem",
+  },
+  aiConfidence: { fontSize: "1.1rem", fontWeight: 800 },
+  aiMeta: {
+    display: "flex",
+    gap: "0.5rem",
+    fontSize: "0.72rem",
+    color: "#94a3b8",
+    marginBottom: "0.75rem",
+  },
+  aiNote: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "0.5rem",
+    backgroundColor: "#fffbeb",
+    border: "1px solid #fde68a",
+    borderRadius: "8px",
+    padding: "0.65rem 0.875rem",
+    fontSize: "0.75rem",
+    color: "#92400e",
+    lineHeight: 1.5,
+  },
+
+  // Diagnosis
+  diagnosisPill: {
+    display: "inline-block",
+    backgroundColor: "#d1fae5",
+    color: "#065f46",
+    fontWeight: 800,
+    fontSize: "1rem",
+    padding: "0.4rem 1.25rem",
+    borderRadius: "20px",
+  },
+  generatedByBadge: {
+    marginTop: "0.75rem",
+    fontSize: "0.75rem",
+    color: "#64748b",
+    fontStyle: "italic",
+  },
+  pendingBox: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    padding: "1.5rem 1rem",
+    textAlign: "center",
+  },
+
+  // Workflow
+  workflowStep: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    padding: "0.5rem 0",
+    borderBottom: "1px solid #f8fafc",
+  },
+  workflowDot: {
+    width: "20px",
+    height: "20px",
+    borderRadius: "50%",
+    border: "2px solid",
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  workflowLabel: { fontSize: "0.825rem" },
+
+  // Lightbox
+  lightboxOverlay: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.92)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+    cursor: "pointer",
+  },
+  lightboxImg: {
+    maxWidth: "85vw",
+    maxHeight: "85vh",
+    objectFit: "contain",
+    borderRadius: "12px",
+    cursor: "default",
+  },
+  lightboxClose: {
+    position: "absolute",
+    top: "1.25rem",
+    right: "1.25rem",
+    background: "rgba(255,255,255,0.15)",
+    border: "none",
+    borderRadius: "50%",
+    width: "40px",
+    height: "40px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#fff",
+    cursor: "pointer",
+    zIndex: 1001,
+  },
+  lightboxNav: {
+    position: "absolute",
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "rgba(255,255,255,0.15)",
+    border: "none",
+    borderRadius: "50%",
+    width: "44px",
+    height: "44px",
+    color: "#fff",
+    fontSize: "1.5rem",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1001,
+  },
+  lightboxCounter: {
+    position: "absolute",
+    bottom: "1.5rem",
+    left: "50%",
+    transform: "translateX(-50%)",
+    color: "#fff",
+    fontSize: "0.875rem",
+    fontWeight: 600,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    padding: "0.3rem 0.875rem",
+    borderRadius: "20px",
+  },
+};

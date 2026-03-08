@@ -10,7 +10,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  */
 export const generatePatientProfile = async (req, res) => {
   try {
-    const patientId = req.params.id;
+    const patientId = req.params.patientId || req.params.id;
     console.log(`🔍 Generating AI Profile for Patient ID: ${patientId}`);
 
     // FIXED SQL - Uses subqueries to avoid ONLY_FULL_GROUP_BY error

@@ -1,0 +1,10 @@
+# ml_server/requirements.txt
+fastapi
+uvicorn
+torch
+torchvision
+timm
+albumentations
+pillow
+requests
+python-dotenv

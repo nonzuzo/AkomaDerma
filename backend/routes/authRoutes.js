@@ -9,8 +9,11 @@ import {
   verifyPasscode,
   getAuthStatus,
   verifyToken,
+  resetPassword,
+ forgotPassword
 } from "../controllers/authController.js";
 import { requireAuth } from "../middleware/authMiddleware.js";
+
 
 const router = express.Router();
 
@@ -26,5 +29,9 @@ router.post("/approve/:userId", approveUser);
 
 // PROTECTED ROUTES
 router.get("/verify", requireAuth, verifyToken);
+
+// forgot/reset password routes (public)
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password",  resetPassword);
 
 export default router;

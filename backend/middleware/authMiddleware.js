@@ -14,7 +14,7 @@ export const requireAuth = async (req, res, next) => {
 
     // Verify JWT token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Get user from database (users table)
     const [users] = await pool.execute(
       "SELECT user_id, full_name, email, role FROM users WHERE user_id = ?",
@@ -43,15 +43,18 @@ export const requireAuth = async (req, res, next) => {
       req.user.clinician_id = clinicians[0].clinician_id;
     }
 
+    // ADD THIS DEBUG LOG
+    console.log("Auth passed - User:", req.user);
+
     next();
   } catch (error) {
-    console.error("Auth middleware error:", error);
+    console.error(" Auth middleware error:", error.message);
     return res.status(403).json({ error: "Invalid or expired token" });
   }
 };
 
 // Simple version - just verify token (for public routes if needed)
-export const authenticateToken = async (req, res, now) => {
+export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
     const token = authHeader && authHeader.split(" ")[1];
