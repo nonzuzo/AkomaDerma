@@ -21,8 +21,6 @@ import { setIO } from "./config/socket.js";
 dotenv.config();
 
 const app = express();
-
-// Use Railway's dynamic PORT or fallback to 5001 locally
 const PORT = process.env.PORT || 5001;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,14 +28,15 @@ const __dirname = path.dirname(__filename);
 
 const server = http.createServer(app);
 
-// Allowed origins — includes production frontend and local dev
+//
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  "https://akomadermagh.up.railway.app", // ← explicit fallback
   "http://localhost:5173",
   "http://localhost:3000",
-].filter(Boolean); // removes undefined if CLIENT_URL is not set
+].filter(Boolean);
 
-// Socket.IO with updated CORS to allow production frontend
+// Socket.IO CORS
 const io = new SocketIOServer(server, {
   cors: {
     origin: allowedOrigins,
@@ -89,8 +88,8 @@ app.use(
   })
 );
 
-// Handle preflight OPTIONS requests for all routes
-app.options("(.*)", cors());
+//
+app.options("*", cors());
 
 app.use(express.json());
 
@@ -106,12 +105,9 @@ app.use((req, res, next) => {
 });
 
 // ── STATIC FILES
-
-// Serve uploaded case images
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ── ROUTES
-
 app.get("/", (req, res) => {
   res.send("Backend is running!");
 });
@@ -125,7 +121,6 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/dermatologists", dermatologistRoutes);
 
 // ── START SERVER
-
 async function startServer() {
   try {
     await connectDB();
