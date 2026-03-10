@@ -173,7 +173,7 @@ export default function ClinicianAppointments() {
 
       // GET /api/clinician/appointments?filter=today|week|all
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinician/appointments?filter=${filter}`,
+        `import.meta.env.VITE_API_URL/clinicians/appointments?filter=${filter}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -219,7 +219,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/clinician/appointments/new-patient`,
+        `${import.meta.env.VITE_API_URL}/clinicians/appointments/new-patient`,
         {
           method: "POST",
           headers: {
@@ -256,7 +256,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/clinician/appointments/existing-patient`,
+        `${import.meta.env.VITE_API_URL}/clinicians/appointments/existing-patient`,
         {
           method: "POST",
           headers: {
@@ -323,7 +323,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinician/appointments/${appointment_id}/status`,
+        `import.meta.env.VITE_API_URL/clinicians/appointments/${appointment_id}/status`,
         {
           method: "PATCH",
           headers: {
@@ -349,7 +349,7 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinician/appointments/${rescheduleModal.appointmentId}/reschedule`,
+        `import.meta.env.VITE_API_URL/clinicians/appointments/${rescheduleModal.appointmentId}/reschedule`,
         {
           method: "PATCH",
           headers: {

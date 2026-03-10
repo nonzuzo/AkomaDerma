@@ -19,11 +19,21 @@ import {
   getCases,
   getPatients,
   getCaseById,
-  getInvoices, //
-  getInvoiceById, //
-  updateInvoiceStatus, //
+  getInvoices,
+  getInvoiceById,
+  updateInvoiceStatus,
   createInvoice,
 } from "../controllers/clinicianController.js";
+
+// ── Appointment controller ────────────────────────────────────────────────────
+import {
+  getClinicianAppointments,
+  createAppointmentForNewPatient,
+  createAppointmentForExistingPatient,
+  updateAppointmentStatus,
+  rescheduleAppointment,
+} from "../controllers/appointmentController.js";
+
 import { requireAuth } from "../middleware/authMiddleware.js";
 import { uploadCaseImages } from "../middleware/uploadMiddleware.js";
 
@@ -35,21 +45,20 @@ router.get("/profile", requireAuth, getClinicianProfile);
 router.get("/dashboard", requireAuth, getDashboardStats);
 
 // ── Notifications ─────────────────────────────────────────────────────────────
-//  ORDER MATTERS — specific routes before param routes
-router.get("/patients", requireAuth, getPatients);
+// ORDER MATTERS — /notifications/count must come before /notifications/:id
 router.get("/notifications", requireAuth, getNotifications);
 router.get("/notifications/count", requireAuth, getNotificationCount);
 router.patch("/notifications/read-all", requireAuth, markAllNotificationsRead);
 router.patch("/notifications/:id/read", requireAuth, markNotificationRead);
 
 // ── Patients ──────────────────────────────────────────────────────────────────
-router.post("/patients/new", requireAuth, createNewPatient);
+// ORDER MATTERS — /patients/search and /patients/new before /patients/:patientId
+router.get("/patients", requireAuth, getPatients);
 router.get("/patients/search", requireAuth, searchPatients);
+router.post("/patients/new", requireAuth, createNewPatient);
 router.get("/patients/:patientId", requireAuth, getPatientById);
 router.get("/patients/:patientId/cases", requireAuth, getPatientCases);
 router.put("/patients/:patientId/vitals", requireAuth, updateLatestCaseVitals);
-
-// AI Profile — now handled in clinicianController (no longer using aiController)
 router.post(
   "/patients/:patientId/ai-profile",
   requireAuth,
@@ -57,6 +66,7 @@ router.post(
 );
 
 // ── Cases ─────────────────────────────────────────────────────────────────────
+// ORDER MATTERS — /cases/submit before /cases/:caseId
 router.get("/cases", requireAuth, getCases);
 router.post("/cases/submit", requireAuth, submitCase);
 router.get("/cases/:caseId", requireAuth, getCaseById);
@@ -67,10 +77,33 @@ router.post(
   uploadImagesForCase
 );
 
+// ── Billing ───────────────────────────────────────────────────────────────────
+// ORDER MATTERS — /billing/:invoiceId/status before /billing/:invoiceId
 router.get("/billing", requireAuth, getInvoices);
-router.post("/billing",requireAuth, createInvoice);  
+router.post("/billing", requireAuth, createInvoice);
 router.get("/billing/:invoiceId", requireAuth, getInvoiceById);
 router.patch("/billing/:invoiceId/status", requireAuth, updateInvoiceStatus);
+
+// ── Appointments ──────────────────────────────────────────────────────────────
+// ORDER MATTERS — /appointments/new-patient and /appointments/existing-patient
+// must come before /appointments/:id to avoid :id catching them as a param
+router.get("/appointments", requireAuth, getClinicianAppointments);
+router.post(
+  "/appointments/new-patient",
+  requireAuth,
+  createAppointmentForNewPatient
+);
+router.post(
+  "/appointments/existing-patient",
+  requireAuth,
+  createAppointmentForExistingPatient
+);
+router.patch("/appointments/:id/status", requireAuth, updateAppointmentStatus);
+router.patch(
+  "/appointments/:id/reschedule",
+  requireAuth,
+  rescheduleAppointment
+);
 
 console.log(" Clinician routes loaded");
 

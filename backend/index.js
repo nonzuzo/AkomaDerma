@@ -116,7 +116,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/cases", caseRoutes);
 app.use("/api/clinicians", clinicianRoutes);
 app.use("/api/patients", patientRoutes);
-app.use("/api/clinician", appointmentRoutes);
+app.use("/api/clinicians", appointmentRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/dermatologists", dermatologistRoutes);
 
