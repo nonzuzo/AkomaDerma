@@ -256,7 +256,9 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/clinicians/appointments/existing-patient`,
+        `${
+          import.meta.env.VITE_API_URL
+        }/clinicians/appointments/existing-patient`,
         {
           method: "POST",
           headers: {
@@ -1217,7 +1219,7 @@ function AppointmentCard({
   );
 }
 
-// ─── Small reusable components  
+// ─── Small reusable components
 function ProfileSection({ color, border, title, titleColor, children }: any) {
   return (
     <div
@@ -1293,7 +1295,7 @@ function EmptyState({ filter, onNew }: { filter: string; onNew: () => void }) {
   );
 }
 
-// ─── Styles  
+// ─── Styles
 const s: Record<string, React.CSSProperties> = {
   gradientTitle: {
     fontSize: "2.5rem",
@@ -1490,7 +1492,6 @@ const s: Record<string, React.CSSProperties> = {
   timestampText: { fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.3rem" },
   actionsCol: { display: "flex", flexDirection: "column", gap: "0.5rem" },
 
-   
   //
   actionBtnGreen: {
     padding: "0.55rem 0.85rem",
