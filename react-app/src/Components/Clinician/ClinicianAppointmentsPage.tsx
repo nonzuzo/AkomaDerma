@@ -171,9 +171,10 @@ export default function ClinicianAppointments() {
       const token = localStorage.getItem("token");
       if (!token) return;
 
-      // GET /api/clinician/appointments?filter=today|week|all
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/appointments?filter=${filter}`,
+        `${
+          import.meta.env.VITE_API_URL
+        }/clinicians/appointments?filter=${filter}`, // wrapped ${}
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -292,7 +293,6 @@ export default function ClinicianAppointments() {
   const handleExistingPatientSearch = async (query: string) => {
     setExistingPatientSearch(query);
 
-    // Clear dropdown if user clears the input
     if (query.length < 2) {
       setExistingPatientResults([]);
       return;
@@ -301,15 +301,13 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/patients/search?q=${encodeURIComponent(
-          query
-        )}`,
+        `${
+          import.meta.env.VITE_API_URL
+        }/clinicians/patients/search?q=${encodeURIComponent(query)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.ok) {
         const data = await response.json();
-        // Backend returns { patients: [...] }
-        // Each patient has: patient_id, full_name, contact_info, case_count
         setExistingPatientResults(data.patients || []);
       }
     } catch (error) {
@@ -325,7 +323,9 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/appointments/${appointment_id}/status`,
+        `${
+          import.meta.env.VITE_API_URL
+        }/clinicians/appointments/${appointment_id}/status`,
         {
           method: "PATCH",
           headers: {
@@ -351,7 +351,9 @@ export default function ClinicianAppointments() {
     try {
       const token = localStorage.getItem("token");
       const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/appointments/${rescheduleModal.appointmentId}/reschedule`,
+        `${import.meta.env.VITE_API_URL}/clinicians/appointments/${
+          rescheduleModal.appointmentId
+        }/reschedule`,
         {
           method: "PATCH",
           headers: {
@@ -533,7 +535,9 @@ export default function ClinicianAppointments() {
                 try {
                   const token = localStorage.getItem("token");
                   const res = await fetch(
-                    `import.meta.env.VITE_API_URL/clinicians/patients/${pid}/ai-profile`,
+                    `${
+                      import.meta.env.VITE_API_URL
+                    }/clinicians/patients/${pid}/ai-profile`,
                     {
                       method: "POST",
                       headers: {
@@ -1159,10 +1163,11 @@ function AppointmentCard({
           {!isCompleted && !isCancelled && (
             <button
               style={s.actionBtnPurple}
-              onClick={() =>
-                navigate(
-                  `/clinician/create-case?patient_id=${appointment.pid}&appointment_id=${appointment.appointment_id}`
-                )
+              onClick={
+                () =>
+                  navigate(
+                    `/clinician/create-case?patient_id=${appointment.pid}&appointment_id=${appointment.appointment_id}`
+                  ) /////////////////////////////////////////////////////////////////////
               }
             >
               ➕ Create Case

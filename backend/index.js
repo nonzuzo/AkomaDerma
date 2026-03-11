@@ -132,4 +132,10 @@ async function startServer() {
   }
 }
 
+// ── 404 CATCH-ALL  
+app.use((req, res) => {
+  res.status(404).json({ error: `Cannot ${req.method} ${req.path}` });
+});
+
+
 startServer();
