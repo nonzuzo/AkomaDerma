@@ -34,4 +34,9 @@ router.get("/verify", requireAuth, verifyToken);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password",  resetPassword);
 
+router.post("/logout", (req, res) => {
+  // JWT is stateless — logout is handled client-side by deleting the token
+  // This endpoint exists so the frontend doesn't get a 404
+  res.json({ success: true, message: "Logged out successfully" });
+});
 export default router;

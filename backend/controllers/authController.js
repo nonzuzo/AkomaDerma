@@ -53,6 +53,23 @@ export const signup = async (req, res) => {
       [full_name, email, role, hashedPassword]
     );
 
+    //
+    const newUserId = result.insertId;
+
+    if (role === "dermatologist") {
+      await pool.execute(
+        "INSERT INTO dermatologists (user_id, specialization, years_experience, created_at) VALUES (?, ?, ?, NOW())",
+        [newUserId, "Dermatologist", 0]
+      );
+    }
+
+    if (role === "clinician") {
+      await pool.execute(
+        "INSERT INTO clinicians (user_id, clinic_name, created_at) VALUES (?, ?, NOW())",
+        [newUserId, "Rabito Clinic"]
+      );
+    }
+
     console.log(` User created (ID: ${result.insertId}) - Awaiting approval`);
     res.status(201).json({
       success: true,

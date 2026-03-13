@@ -1,5 +1,11 @@
 // src/Components/Clinician/ClinicianCreateCase.tsx
-// Complete CreateCase component with backend integration for WALK-IN FLOW
+// 5-step wizard for creating a new dermatology case and uploading lesion images.
+// Flow: Select Patient → Record Vitals → Chief Complaint → Upload Images → Review & Submit
+//
+// Submit flow (two-step):
+//   Step A → POST /clinicians/cases/submit       creates the case, returns case_id
+//   Step B → POST /clinicians/cases/:id/images   uploads image files to case_images table
+
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -11,59 +17,83 @@ import {
   Upload,
 } from "lucide-react";
 
-// Gradient title style for main header
-const gradientTitleStyle = {
+// ─── Constants ────────────────────────────────────────────────────────────────
+// Single API base — avoids repeating import.meta.env.VITE_API_URL everywhere
+const API = `${import.meta.env.VITE_API_URL}`;
+const token = () => localStorage.getItem("token") ?? "";
+const auth = () => ({ Authorization: `Bearer ${token()}` });
+
+// Gradient style for the page title
+const gradientTitleStyle: React.CSSProperties = {
   fontSize: "2.5rem",
-  fontWeight: "bold" as const,
+  fontWeight: "bold",
   background: "linear-gradient(135deg, #3db5e6 0%, #1e40af 100%)",
-  WebkitBackgroundClip: "text" as const,
-  WebkitTextFillColor: "transparent" as const,
+  WebkitBackgroundClip: "text",
+  WebkitTextFillColor: "transparent",
   margin: 0,
   lineHeight: 1.2,
 };
 
-// Main CreateCase component with 5-step wizard
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface Vitals {
+  bp: string;
+  pulse: string;
+  temp: string;
+  weight: string;
+  height: string;
+}
+
+interface FormData {
+  patientPid: string;
+  vitals: Vitals;
+  chiefComplaint: string;
+  lesionDuration: string;
+  lesionLocation: string;
+  symptoms: string;
+  priorTreatment: string;
+  lesionType: string;
+  parentCaseId: number | null;
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function ClinicianCreateCase() {
-  // Step navigation state
   const [step, setStep] = useState(1);
 
-  // Form data state matching database cases table schema
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormData>({
     patientPid: "",
     vitals: { bp: "", pulse: "", temp: "", weight: "", height: "" },
     chiefComplaint: "",
     lesionDuration: "",
     lesionLocation: "",
     symptoms: "",
-    priorTreatment: "", // Maps to prior_treatment in DB
+    priorTreatment: "",
     lesionType: "",
-    parentCaseId: null as number | null,
+    parentCaseId: null,
   });
 
-  // NEW: store appointment_id if coming from appointment page
+  // Set when navigating here from the appointments page
   const [appointmentId, setAppointmentId] = useState<number | null>(null);
 
-  // Image upload state
+  // Image files selected in Step 4 — uploaded in handleSubmitCase Step B
   const [images, setImages] = useState<File[]>([]);
 
-  // Patient search and loading states
+  // Step 1 patient search state
   const [searchQuery, setSearchQuery] = useState("");
   const [patients, setPatients] = useState<any[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<any>(null);
 
-  // Form submission state
+  // Submission state
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  // Navigation hook
   const navigate = useNavigate();
 
-  // Handle step navigation
   const nextStep = () => setStep((s) => s + 1);
   const prevStep = () => setStep((s) => s - 1);
 
-  // Initialize component - check for walk-in patient from URL params
+  // ── On mount — read URL params ───────────────────────────────────────────
+  // patient_id and appointment_id may be pre-filled when navigating from
+  // the Patient Profile or Appointments pages
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const patientId = urlParams.get("patient_id");
@@ -73,12 +103,12 @@ export default function ClinicianCreateCase() {
     if (appointmentIdRaw) setAppointmentId(Number(appointmentIdRaw));
 
     if (patientId) {
+      // Pre-select patient and skip to Step 2
       setFormData((prev) => ({
         ...prev,
         patientPid: patientId,
         parentCaseId: parentCaseIdRaw ? Number(parentCaseIdRaw) : null,
       }));
-      setSelectedPatient({ patient_id: patientId });
       setStep(2);
     } else {
       fetchRecentPatients();
@@ -86,31 +116,15 @@ export default function ClinicianCreateCase() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch recent patients for Step 1 (prioritizes walk-ins and recent cases)
+  // ── Fetch recent patients ────────────────────────────────────────────────
   const fetchRecentPatients = async () => {
     setLoadingPatients(true);
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        console.error("No auth token found");
-        return;
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/clinicians/patients/search`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      const res = await fetch(`${API}/clinicians/patients/search`, {
+        headers: auth(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
       setPatients(data.patients || []);
     } catch (error) {
       console.error("Failed to load recent patients:", error);
@@ -119,25 +133,20 @@ export default function ClinicianCreateCase() {
     }
   };
 
-  // Search patients by name or phone number
+  // ── Patient search ───────────────────────────────────────────────────────
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
     if (query.length < 2) {
       fetchRecentPatients();
       return;
     }
-
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/patients/search?q=${encodeURIComponent(
-          query
-        )}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await fetch(
+        `${API}/clinicians/patients/search?q=${encodeURIComponent(query)}`,
+        { headers: auth() }
       );
-
-      if (response.ok) {
-        const data = await response.json();
+      if (res.ok) {
+        const data = await res.json();
         setPatients(data.patients || []);
       }
     } catch (error) {
@@ -145,7 +154,7 @@ export default function ClinicianCreateCase() {
     }
   };
 
-  // Update vitals field in form data
+  // ── Update a single vitals field ─────────────────────────────────────────
   const updateVitals = (field: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -153,8 +162,19 @@ export default function ClinicianCreateCase() {
     }));
   };
 
-  // Submit complete case to backend
+  // ── Case submission ──────────────────────────────────────────────────────
+  // Step A: POST /clinicians/cases/submit        → creates case, returns case_id
+  // Step B: POST /clinicians/cases/:id/images    → uploads images to case_images
+  //
+  // Images are sent in a separate multipart request AFTER the case is created
+  // because the case_id is required to link images in the case_images table.
   const handleSubmitCase = async () => {
+    console.log("🚀 handleSubmitCase called");
+    console.log("Patient PID:", formData.patientPid);
+    console.log("Images count:", images.length);
+    console.log("Chief complaint:", formData.chiefComplaint);
+
+    // Client-side validation
     if (!formData.patientPid) {
       setSubmitError("Please select a patient");
       return;
@@ -172,65 +192,56 @@ export default function ClinicianCreateCase() {
     setSubmitError("");
 
     try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        setSubmitError("Authentication required");
-        return;
-      }
+      // ── Step A: Create the case ─────────────────────────────────────────
+      console.log("📤 Submitting case to backend...");
+      const caseRes = await fetch(`${API}/clinicians/cases/submit`, {
+        method: "POST",
+        headers: {
+          ...auth(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          patient_id: parseInt(formData.patientPid),
+          vitals: JSON.stringify(formData.vitals),
+          chief_complaint: formData.chiefComplaint,
+          lesion_duration: formData.lesionDuration,
+          lesion_location: formData.lesionLocation,
+          symptoms: formData.symptoms,
+          prior_treatment: formData.priorTreatment,
+          lesion_type: formData.lesionType,
+          image_count: images.length,
+          parent_case_id: formData.parentCaseId,
+        }),
+      });
 
-      // 1) Create case (with vitals + image_count)
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/clinicians/cases/submit`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            patient_id: parseInt(formData.patientPid),
-            vitals: JSON.stringify(formData.vitals),
-            chief_complaint: formData.chiefComplaint,
-            lesion_duration: formData.lesionDuration,
-            lesion_location: formData.lesionLocation,
-            symptoms: formData.symptoms,
-            prior_treatment: formData.priorTreatment,
-            lesion_type: formData.lesionType,
-            image_count: images.length,
-            parent_case_id: formData.parentCaseId,
-            // NOTE: not sending appointment_id yet because backend doesn’t accept it in your controller.
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+      if (!caseRes.ok) {
+        const errorData = await caseRes.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to submit case");
       }
 
-      const caseData = await response.json();
+      const caseData = await caseRes.json();
       const caseId = caseData.case_id;
+      console.log("✅ Case created with ID:", caseId);
 
-      // 2) Upload images for this case
-      const formDataImages = new FormData();
-      images.forEach((img) => formDataImages.append("images", img));
+      // ── Step B: Upload images ───────────────────────────────────────────
+      // Do NOT set Content-Type manually — browser sets it automatically
+      // with the correct multipart boundary when body is FormData
+      console.log("⬆️ Uploading images for case:", caseId);
+      const imageFormData = new FormData();
+      images.forEach((img) => imageFormData.append("images", img));
 
-      const imgRes = await fetch(
-        `import.meta.env.VITE_API_URL/clinicians/cases/${caseId}/images`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formDataImages,
-        }
-      );
+      const imgRes = await fetch(`${API}/clinicians/cases/${caseId}/images`, {
+        method: "POST",
+        headers: auth(), // ← auth only, NO Content-Type header
+        body: imageFormData,
+      });
 
       if (!imgRes.ok) {
         const err = await imgRes.json().catch(() => ({}));
         throw new Error(err.message || "Failed to upload images");
       }
 
+      console.log("✅ Images uploaded successfully");
       alert("Case submitted successfully to dermatologist!");
       navigate("/clinician/dashboard");
     } catch (error) {
@@ -243,16 +254,16 @@ export default function ClinicianCreateCase() {
     }
   };
 
-  // Main render with 5-step wizard
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={pageContainer}>
-      {/* Page header with gradient title */}
+      {/* Page header */}
       <div style={header}>
         <h1 style={gradientTitleStyle}>Create New Case</h1>
         <p style={subtitle}>Complete dermatology case for specialist review</p>
       </div>
 
-      {/* Progress stepper showing current step */}
+      {/* Step progress indicator */}
       <div style={stepper}>
         {["Patient", "Vitals", "Complaint", "Images", "Review"].map(
           (label, index) => (
@@ -264,7 +275,7 @@ export default function ClinicianCreateCase() {
         )}
       </div>
 
-      {/* Step content - conditional rendering */}
+      {/* Step content */}
       <div style={content}>
         {step === 1 && (
           <Step1
@@ -294,7 +305,10 @@ export default function ClinicianCreateCase() {
         )}
       </div>
 
-      {/* Navigation controls */}
+      {/* ── Navigation bar ──────────────────────────────────────────────────
+          Handles Previous and Next for steps 1–4 only.
+          Step 5 has its own dedicated Submit button inside the Step5 component.
+          This eliminates all step-counting logic from the submit action. */}
       <div style={navigation}>
         {step > 1 && (
           <button
@@ -306,20 +320,22 @@ export default function ClinicianCreateCase() {
           </button>
         )}
         <div style={stepCounter}>Step {step} of 5</div>
-        <button
-          style={navButton(submitting ? "disabled" : "primary")}
-          onClick={step < 5 ? nextStep : handleSubmitCase}
-          disabled={submitting}
-        >
-          {submitting ? "Submitting..." : step === 5 ? "Submit Case" : "Next"}
-          {!submitting && <ArrowRight size={16} />}
-        </button>
+        {/* Only show Next button on steps 1–4 */}
+        {step < 5 && (
+          <button
+            style={navButton("primary")}
+            onClick={nextStep}
+            disabled={submitting}
+          >
+            Next <ArrowRight size={16} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-// Step 1: Patient selection with search (recent patients + search)
+// ─── Step 1: Patient Selection ────────────────────────────────────────────────
 function Step1({
   patients,
   formData,
@@ -332,8 +348,6 @@ function Step1({
   return (
     <div style={stepCard}>
       <h2 style={stepTitle}>Select Patient</h2>
-
-      {/* Search input */}
       <div style={searchContainer}>
         <Search size={18} style={searchIcon} />
         <input
@@ -343,8 +357,6 @@ function Step1({
           onChange={(e) => onSearch(e.target.value)}
         />
       </div>
-
-      {/* Loading state */}
       {loadingPatients ? (
         <div style={loadingText}>Loading recent patients...</div>
       ) : (
@@ -359,24 +371,34 @@ function Step1({
                 key={patient.patient_id}
                 style={{
                   ...patientCard,
-                  ...(selectedPatientId === patient.patient_id.toString() &&
-                    selectedPatientStyle),
+                  ...(selectedPatientId === patient.patient_id.toString()
+                    ? selectedPatientStyle
+                    : {}),
                 }}
-                onClick={() => {
+                onClick={() =>
                   setFormData({
                     ...formData,
                     patientPid: patient.patient_id.toString(),
-                  });
-                }}
+                  })
+                }
               >
                 <div style={patientAvatar}>
-                  {(patient.name?.[0] || "P").toUpperCase()}
+                  {(patient.full_name?.[0] || "P").toUpperCase()}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={patientName}>{patient.name}</div>
-                  <div style={patientPid}>ID: {patient.patient_id}</div>
+                  <div style={patientName}>
+                    {patient.full_name || "Unknown"}
+                  </div>
+                  <div style={patientPid}>
+                    PID-{String(patient.patient_id).padStart(6, "0")}
+                  </div>
                 </div>
-                <div style={aiSummary}>{patient.aiSummary}</div>
+                {patient.case_count > 0 && (
+                  <div style={caseBadge}>
+                    {patient.case_count}{" "}
+                    {patient.case_count === 1 ? "case" : "cases"}
+                  </div>
+                )}
               </div>
             ))
           )}
@@ -386,12 +408,12 @@ function Step1({
   );
 }
 
-// Step 2: Record patient vitals
+// ─── Step 2: Vitals ───────────────────────────────────────────────────────────
 function Step2({
   formData,
   updateVitals,
 }: {
-  formData: any;
+  formData: FormData;
   updateVitals: (field: string, value: string) => void;
 }) {
   return (
@@ -401,31 +423,31 @@ function Step2({
         <FormInput
           label="Blood Pressure"
           value={formData.vitals.bp}
-          onChange={(val) => updateVitals("bp", val)}
+          onChange={(v) => updateVitals("bp", v)}
           placeholder="120/80"
         />
         <FormInput
           label="Pulse"
           value={formData.vitals.pulse}
-          onChange={(val) => updateVitals("pulse", val)}
+          onChange={(v) => updateVitals("pulse", v)}
           placeholder="72 bpm"
         />
         <FormInput
           label="Temperature"
           value={formData.vitals.temp}
-          onChange={(val) => updateVitals("temp", val)}
+          onChange={(v) => updateVitals("temp", v)}
           placeholder="36.8°C"
         />
         <FormInput
           label="Weight"
           value={formData.vitals.weight}
-          onChange={(val) => updateVitals("weight", val)}
+          onChange={(v) => updateVitals("weight", v)}
           placeholder="70 kg"
         />
         <FormInput
           label="Height"
           value={formData.vitals.height}
-          onChange={(val) => updateVitals("height", val)}
+          onChange={(v) => updateVitals("height", v)}
           placeholder="170 cm"
         />
       </div>
@@ -433,8 +455,14 @@ function Step2({
   );
 }
 
-// Step 3: Chief complaint and symptoms
-function Step3({ formData, setFormData }: { formData: any; setFormData: any }) {
+// ─── Step 3: Chief Complaint ──────────────────────────────────────────────────
+function Step3({
+  formData,
+  setFormData,
+}: {
+  formData: FormData;
+  setFormData: React.Dispatch<React.SetStateAction<FormData>>;
+}) {
   return (
     <div style={stepCard}>
       <h2 style={stepTitle}>Chief Complaint</h2>
@@ -443,46 +471,38 @@ function Step3({ formData, setFormData }: { formData: any; setFormData: any }) {
           <FormInput
             label="Lesion Duration"
             value={formData.lesionDuration}
-            onChange={(val) =>
-              setFormData({ ...formData, lesionDuration: val })
-            }
+            onChange={(v) => setFormData((p) => ({ ...p, lesionDuration: v }))}
             placeholder="3 weeks"
           />
           <FormInput
             label="Lesion Location"
             value={formData.lesionLocation}
-            onChange={(val) =>
-              setFormData({ ...formData, lesionLocation: val })
-            }
+            onChange={(v) => setFormData((p) => ({ ...p, lesionLocation: v }))}
             placeholder="Chest, back"
           />
         </div>
-
         <FormTextarea
           label="Chief Complaint *"
           value={formData.chiefComplaint}
-          onChange={(val) => setFormData({ ...formData, chiefComplaint: val })}
+          onChange={(v) => setFormData((p) => ({ ...p, chiefComplaint: v }))}
           placeholder="Describe the main skin concern in detail..."
         />
-
         <FormTextarea
           label="Symptoms"
           value={formData.symptoms}
-          onChange={(val) => setFormData({ ...formData, symptoms: val })}
-          placeholder="Itching, pain, spreading pattern, changes over time..."
+          onChange={(v) => setFormData((p) => ({ ...p, symptoms: v }))}
+          placeholder="Itching, pain, spreading pattern..."
         />
-
         <FormInput
           label="Prior Treatment"
           value={formData.priorTreatment}
-          onChange={(val) => setFormData({ ...formData, priorTreatment: val })}
-          placeholder="Hydrocortisone cream, antifungals, etc."
+          onChange={(v) => setFormData((p) => ({ ...p, priorTreatment: v }))}
+          placeholder="Hydrocortisone cream, antifungals..."
         />
-
         <FormInput
           label="Lesion Type"
           value={formData.lesionType}
-          onChange={(val) => setFormData({ ...formData, lesionType: val })}
+          onChange={(v) => setFormData((p) => ({ ...p, lesionType: v }))}
           placeholder="Rash, pustules, scaling, vesicles"
         />
       </div>
@@ -490,23 +510,27 @@ function Step3({ formData, setFormData }: { formData: any; setFormData: any }) {
   );
 }
 
-// Step 4: Image upload with drag & drop
-function Step4({ images, setImages }: { images: File[]; setImages: any }) {
+// ─── Step 4: Image Upload ─────────────────────────────────────────────────────
+// Files are stored in state here and uploaded in handleSubmitCase Step B.
+function Step4({
+  images,
+  setImages,
+}: {
+  images: File[];
+  setImages: React.Dispatch<React.SetStateAction<File[]>>;
+}) {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const newImages = Array.from(e.dataTransfer.files);
-    setImages((prev: File[]) => [...prev, ...newImages]);
+    setImages((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newImages = Array.from(e.target.files);
-      setImages((prev: File[]) => [...prev, ...newImages]);
-    }
+    if (e.target.files)
+      setImages((prev) => [...prev, ...Array.from(e.target.files!)]);
   };
 
   const removeImage = (index: number) => {
-    setImages((prev: File[]) => prev.filter((_, i) => i !== index));
+    setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -514,7 +538,6 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
       <h2 style={stepTitle}>
         Clinical Images <span style={required}>Required</span>
       </h2>
-
       <div
         style={dropZone}
         onDragOver={(e) => e.preventDefault()}
@@ -523,7 +546,6 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
         <Upload size={48} style={dropIcon} />
         <h3 style={dropTitle}>Drag & drop images here</h3>
         <p style={dropText}>JPG, PNG (max 10MB total, up to 5 images)</p>
-
         <input
           type="file"
           multiple
@@ -532,7 +554,6 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
           id="imageUpload"
           onChange={handleFileSelect}
         />
-
         <button
           type="button"
           style={browseButton}
@@ -545,10 +566,11 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
           Browse Files
         </button>
       </div>
-
       {images.length > 0 && (
         <div style={imagePreview}>
-          <h4 style={{ margin: "0 0 1rem 0" }}>{images.length} image(s)</h4>
+          <h4 style={{ margin: "0 0 1rem 0" }}>
+            {images.length} image(s) selected
+          </h4>
           <div style={previewGrid}>
             {images.slice(0, 5).map((img, idx) => (
               <div key={idx} style={previewItem}>
@@ -561,7 +583,6 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
                   type="button"
                   style={removeBtn}
                   onClick={() => removeImage(idx)}
-                  title="Remove image"
                 >
                   ✕
                 </button>
@@ -574,7 +595,10 @@ function Step4({ images, setImages }: { images: File[]; setImages: any }) {
   );
 }
 
-// Step 5: Review and submit case
+// ─── Step 5: Review & Submit ──────────────────────────────────────────────────
+// Read-only summary of all entered data.
+// ✅ Has its own Submit button — does NOT rely on the navigation bar.
+// This is the fix for the button never calling handleSubmitCase.
 function Step5({
   formData,
   images,
@@ -583,7 +607,7 @@ function Step5({
   onSubmit,
   appointmentId,
 }: {
-  formData: any;
+  formData: FormData;
   images: File[];
   submitError: string;
   submitting: boolean;
@@ -596,41 +620,38 @@ function Step5({
 
       <div style={reviewGrid}>
         <div style={reviewSection}>
-          <h3>Patient</h3>
+          <h3>Patient ID</h3>
           <p style={reviewValue}>{formData.patientPid || "Not selected"}</p>
         </div>
-
         <div style={reviewSection}>
           <h3>Vitals</h3>
           <p style={reviewValue}>
             BP: {formData.vitals.bp || "N/A"} | Weight:{" "}
-            {formData.vitals.weight || "N/A"}kg
+            {formData.vitals.weight || "N/A"} kg
           </p>
         </div>
-
         <div style={reviewSection}>
           <h3>Images</h3>
-          <p style={reviewValue}>{images.length} photos</p>
+          <p style={reviewValue}>{images.length} photo(s) ready to upload</p>
         </div>
-
         <div style={reviewSection}>
-          <h3>Complaint</h3>
+          <h3>Chief Complaint</h3>
           <p style={reviewValue}>
             {formData.chiefComplaint
-              ? `${formData.chiefComplaint.slice(0, 100)}...`
+              ? `${formData.chiefComplaint.slice(0, 100)}${
+                  formData.chiefComplaint.length > 100 ? "..." : ""
+                }`
               : "N/A"}
           </p>
         </div>
-
         {formData.parentCaseId && (
           <div style={reviewSection}>
             <h3>Follow-up</h3>
             <p style={reviewValue}>
-              This case is a follow-up to Case #{formData.parentCaseId}
+              Follow-up to Case #{formData.parentCaseId}
             </p>
           </div>
         )}
-
         {appointmentId && (
           <div style={reviewSection}>
             <h3>Appointment</h3>
@@ -642,24 +663,44 @@ function Step5({
       <div style={submitNote}>
         <CheckCircle size={20} style={{ color: "#10b981" }} />
         <span>
-          This case will be sent to AI analysis and assigned to dermatology
-          specialist
+          This case will be sent for AI analysis and assigned to the dermatology
+          specialist queue.
         </span>
       </div>
 
+      {/* Inline error shown above the submit button */}
       {submitError && <div style={errorMessage}>{submitError}</div>}
 
-      {/* optional: show submit disabled state hint */}
       {submitting && (
-        <div style={{ marginTop: "1rem", color: "#6b7280" }}>
-          Submitting, please wait...
-        </div>
+        <p style={{ textAlign: "center", color: "#6b7280", marginTop: "1rem" }}>
+          Uploading case and images, please wait...
+        </p>
       )}
+
+      {/* ✅ Dedicated submit button — direct onClick, no step logic */}
+      <button
+        style={{
+          width: "100%",
+          marginTop: "1.5rem",
+          padding: "1rem",
+          backgroundColor: submitting ? "#94a3b8" : "#3db5e6",
+          color: "#ffffff",
+          border: "none",
+          borderRadius: "10px",
+          fontSize: "1rem",
+          fontWeight: 700,
+          cursor: submitting ? "not-allowed" : "pointer",
+        }}
+        onClick={onSubmit}
+        disabled={submitting}
+      >
+        {submitting ? "Uploading..." : "✅ Submit Case to Dermatologist"}
+      </button>
     </div>
   );
 }
 
-// Reusable form input component
+// ─── Reusable form components ─────────────────────────────────────────────────
 function FormInput({
   label,
   value,
@@ -668,7 +709,7 @@ function FormInput({
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (v: string) => void;
   placeholder: string;
 }) {
   return (
@@ -679,13 +720,11 @@ function FormInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        required={label.includes("*")}
       />
     </div>
   );
 }
 
-// Reusable textarea component
 function FormTextarea({
   label,
   value,
@@ -694,7 +733,7 @@ function FormTextarea({
 }: {
   label: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (v: string) => void;
   placeholder: string;
 }) {
   return (
@@ -711,141 +750,121 @@ function FormTextarea({
   );
 }
 
-// All component styles
-const pageContainer = {
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const pageContainer: React.CSSProperties = {
   padding: "2rem 0",
   maxWidth: "900px",
   margin: "0 auto",
   width: "100%",
-} as const;
-
-const header = {
+};
+const header: React.CSSProperties = {
   backgroundColor: "#ffffff",
   padding: "2rem",
   borderRadius: "12px",
   border: "1px solid #e5e7eb",
   marginBottom: "2rem",
   boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-} as const;
-
-const subtitle = {
+};
+const subtitle: React.CSSProperties = {
   color: "#6b7280",
   fontSize: "0.95rem",
   marginTop: "0.5rem",
-} as const;
-
-const stepper = {
+};
+const stepper: React.CSSProperties = {
   display: "flex",
   justifyContent: "center",
   gap: "3rem",
   marginBottom: "2.5rem",
-  flexWrap: "wrap" as const,
-} as const;
-
-const stepItem = (active: boolean) =>
-  ({
-    opacity: active ? 1 : 0.4,
-    textAlign: "center" as const,
-  } as const);
-
-const stepCircle = (active: boolean) =>
-  ({
-    width: 40,
-    height: 40,
-    borderRadius: "50%",
-    backgroundColor: active ? "#3db5e6" : "#f3f4f6",
-    color: active ? "#ffffff" : "#6b7280",
-    display: "flex" as const,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    fontWeight: 600,
-    marginBottom: "0.5rem",
-  } as const);
-
-const stepLabel = {
+  flexWrap: "wrap",
+};
+const stepItem = (active: boolean): React.CSSProperties => ({
+  opacity: active ? 1 : 0.4,
+  textAlign: "center",
+});
+const stepCircle = (active: boolean): React.CSSProperties => ({
+  width: 40,
+  height: 40,
+  borderRadius: "50%",
+  backgroundColor: active ? "#3db5e6" : "#f3f4f6",
+  color: active ? "#ffffff" : "#6b7280",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontWeight: 600,
+  marginBottom: "0.5rem",
+});
+const stepLabel: React.CSSProperties = {
   fontSize: "0.85rem",
   fontWeight: 500,
   color: "#374151",
-} as const;
-
-const content = { marginBottom: "3rem" } as const;
-
-const stepCard = {
+};
+const content: React.CSSProperties = { marginBottom: "3rem" };
+const stepCard: React.CSSProperties = {
   backgroundColor: "#ffffff",
   borderRadius: "12px",
   padding: "2.5rem",
   border: "1px solid #e5e7eb",
   boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-} as const;
-
-const stepTitle = {
+};
+const stepTitle: React.CSSProperties = {
   fontSize: "1.3rem",
   fontWeight: 600,
   color: "#111827",
   marginBottom: "1.5rem",
-} as const;
-
-const required = {
+};
+const required: React.CSSProperties = {
   color: "#dc2626",
   fontSize: "0.9rem",
   fontWeight: 500,
-} as const;
-
-const navigation = {
+};
+const navigation: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
   maxWidth: "600px",
   margin: "0 auto",
-} as const;
-
-const stepCounter = {
+};
+const stepCounter: React.CSSProperties = {
   fontWeight: 500,
   color: "#6b7280",
   fontSize: "0.95rem",
-} as const;
-
-const navButton = (type: string) =>
-  ({
-    padding: "0.875rem 2rem",
-    borderRadius: "8px",
-    fontWeight: 500,
-    cursor: type === "disabled" ? "not-allowed" : "pointer",
-    border: "none",
-    opacity: type === "disabled" ? 0.5 : 1,
-    ...(type === "primary"
-      ? { backgroundColor: "#3db5e6", color: "#ffffff" }
-      : type === "disabled"
-      ? { backgroundColor: "#f3f4f6", color: "#9ca3af" }
-      : {
-          backgroundColor: "transparent",
-          color: "#374151",
-          border: "1px solid #d1d5db",
-        }),
-  } as any);
-
-const searchContainer = { position: "relative", marginBottom: "2rem" } as const;
-
-const searchIcon = {
-  position: "absolute" as const,
+};
+const navButton = (type: string): React.CSSProperties => ({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  padding: "0.875rem 2rem",
+  borderRadius: "8px",
+  fontWeight: 500,
+  cursor: "pointer",
+  border: type === "secondary" ? "1px solid #d1d5db" : "none",
+  backgroundColor: type === "primary" ? "#3db5e6" : "transparent",
+  color: type === "primary" ? "#ffffff" : "#374151",
+});
+const searchContainer: React.CSSProperties = {
+  position: "relative",
+  marginBottom: "2rem",
+};
+const searchIcon: React.CSSProperties = {
+  position: "absolute",
   left: "1rem",
   top: "50%",
   transform: "translateY(-50%)",
   color: "#9ca3af",
-} as const;
-
-const searchInput = {
+};
+const searchInput: React.CSSProperties = {
   width: "100%",
   padding: "0.875rem 1rem 0.875rem 3rem",
   border: "2px solid #e5e7eb",
   borderRadius: "8px",
   fontSize: "0.95rem",
-  transition: "border-color 0.2s",
-} as const;
-
-const patientList = { maxHeight: "400px", overflowY: "auto" } as const;
-
-const patientCard = {
+  boxSizing: "border-box",
+};
+const patientList: React.CSSProperties = {
+  maxHeight: "400px",
+  overflowY: "auto",
+};
+const patientCard: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: "1rem",
@@ -853,120 +872,108 @@ const patientCard = {
   borderRadius: "8px",
   cursor: "pointer",
   border: "1px solid #e5e7eb",
-  transition: "all 0.2s",
   marginBottom: "0.5rem",
-} as const;
-
-const selectedPatientStyle = {
+};
+const selectedPatientStyle: React.CSSProperties = {
   borderColor: "#3db5e6",
   backgroundColor: "#f0f9ff",
-  boxShadow: "0 0 0 3px rgba(59, 181, 230, 0.1)",
-} as const;
-
-const patientAvatar = {
+  boxShadow: "0 0 0 3px rgba(59,181,230,0.1)",
+};
+const patientAvatar: React.CSSProperties = {
   width: 48,
   height: 48,
   borderRadius: "12px",
   backgroundColor: "#3db5e6",
   color: "#ffffff",
-  display: "flex" as const,
-  alignItems: "center" as const,
-  justifyContent: "center" as const,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   fontWeight: 600,
   fontSize: "1.1rem",
-} as const;
-
-const patientName = {
+  flexShrink: 0,
+};
+const patientName: React.CSSProperties = {
   fontWeight: 600,
   color: "#111827",
   marginBottom: "0.25rem",
-} as const;
-
-const patientPid = { fontSize: "0.85rem", color: "#6b7280" } as const;
-
-const aiSummary = {
-  fontSize: "0.8rem",
-  color: "#3db5e6",
-  marginLeft: "auto",
-  fontStyle: "italic",
-} as const;
-
-const loadingText = {
-  textAlign: "center" as const,
+};
+const patientPid: React.CSSProperties = {
+  fontSize: "0.85rem",
+  color: "#6b7280",
+};
+const caseBadge: React.CSSProperties = {
+  fontSize: "0.75rem",
+  fontWeight: 600,
+  padding: "0.25rem 0.65rem",
+  borderRadius: "20px",
+  backgroundColor: "#ede9fe",
+  color: "#5b21b6",
+};
+const loadingText: React.CSSProperties = {
+  textAlign: "center",
   padding: "2rem",
   color: "#6b7280",
-} as const;
-
-const vitalsGrid = {
+};
+const vitalsGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
   gap: "1.5rem",
-} as const;
-
-const formGrid = {
+};
+const formGrid: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "1.5rem",
-} as const;
-
-const twoCol = {
+};
+const twoCol: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
   gap: "1.5rem",
-} as const;
-
-const formGroup = {
+};
+const formGroup: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-} as const;
-
-const formLabel = {
+};
+const formLabel: React.CSSProperties = {
   fontSize: "0.85rem",
   color: "#374151",
   marginBottom: "0.5rem",
   fontWeight: 500,
-} as const;
-
-const formInput = {
+};
+const formInput: React.CSSProperties = {
   padding: "0.875rem 1rem",
   border: "1px solid #d1d5db",
   borderRadius: "8px",
   fontSize: "0.95rem",
-  transition: "border-color 0.2s",
-} as const;
-
-const formTextarea = {
+};
+const formTextarea: React.CSSProperties = {
   ...formInput,
   minHeight: "100px",
   resize: "vertical",
   fontFamily: "inherit",
-} as any;
-
-const dropZone = {
+};
+const dropZone: React.CSSProperties = {
   border: "2px dashed #d1d5db",
   borderRadius: "12px",
   padding: "3rem 2rem",
-  textAlign: "center" as const,
+  textAlign: "center",
   backgroundColor: "#fafbfc",
-  transition: "border-color 0.2s",
-} as const;
-
-const dropIcon = {
+};
+const dropIcon: React.CSSProperties = {
   color: "#9ca3af",
   margin: "0 auto 1rem",
   display: "block",
-} as const;
-
-const dropTitle = {
+};
+const dropTitle: React.CSSProperties = {
   fontSize: "1.25rem",
   fontWeight: 600,
   color: "#111827",
   marginBottom: "0.5rem",
-} as const;
-
-const dropText = { color: "#6b7280", marginBottom: "2rem" } as const;
-
-const browseButton = {
+};
+const dropText: React.CSSProperties = {
+  color: "#6b7280",
+  marginBottom: "2rem",
+};
+const browseButton: React.CSSProperties = {
   padding: "0.75rem 2rem",
   backgroundColor: "#3db5e6",
   color: "#ffffff",
@@ -974,29 +981,23 @@ const browseButton = {
   borderRadius: "8px",
   cursor: "pointer",
   fontWeight: 500,
-  transition: "background-color 0.2s",
-} as const;
-
-const imagePreview = { marginTop: "2rem" } as const;
-
-const previewGrid = {
+};
+const imagePreview: React.CSSProperties = { marginTop: "2rem" };
+const previewGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
   gap: "1rem",
-} as const;
-
-const previewItem = { position: "relative" as const } as const;
-
-const previewImage = {
+};
+const previewItem: React.CSSProperties = { position: "relative" };
+const previewImage: React.CSSProperties = {
   width: "100%",
   height: 100,
-  objectFit: "cover" as const,
+  objectFit: "cover",
   borderRadius: "8px",
   border: "1px solid #e5e7eb",
-} as const;
-
-const removeBtn = {
-  position: "absolute" as const,
+};
+const removeBtn: React.CSSProperties = {
+  position: "absolute",
   top: "-8px",
   right: "-8px",
   backgroundColor: "#ef4444",
@@ -1007,31 +1008,27 @@ const removeBtn = {
   height: 24,
   cursor: "pointer",
   fontSize: "12px",
-  display: "flex" as const,
-  alignItems: "center" as const,
-  justifyContent: "center" as const,
-} as const;
-
-const reviewGrid = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+const reviewGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
   gap: "1.5rem",
-} as const;
-
-const reviewSection = {
+};
+const reviewSection: React.CSSProperties = {
   backgroundColor: "#f8fafc",
   padding: "1.5rem",
   borderRadius: "8px",
   border: "1px solid #e5e7eb",
-} as const;
-
-const reviewValue = {
+};
+const reviewValue: React.CSSProperties = {
   fontWeight: 500,
   color: "#111827",
   margin: "0.25rem 0 0 0",
-} as const;
-
-const submitNote = {
+};
+const submitNote: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: "0.75rem",
@@ -1041,9 +1038,8 @@ const submitNote = {
   marginTop: "2rem",
   color: "#166534",
   border: "1px solid #bbf7d0",
-} as const;
-
-const errorMessage = {
+};
+const errorMessage: React.CSSProperties = {
   backgroundColor: "#fee2e2",
   color: "#dc2626",
   padding: "1rem",
@@ -1051,4 +1047,4 @@ const errorMessage = {
   borderLeft: "4px solid #ef4444",
   marginTop: "1rem",
   fontSize: "0.9rem",
-} as const;
+};

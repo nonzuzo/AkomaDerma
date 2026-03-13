@@ -883,8 +883,10 @@ export const uploadImagesForCase = async (req, res) => {
     const caseId = Number(req.params.caseId);
     if (!Number.isInteger(caseId) || caseId <= 0)
       return res.status(400).json({ message: "Invalid caseId" });
-    if (!req.files || req.files.length === 0)
+
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
       return res.status(400).json({ message: "No images uploaded" });
+    }
 
     const userId = req.user.user_id;
 
