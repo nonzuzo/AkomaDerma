@@ -889,27 +889,28 @@ export const submitCase = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinicians/cases/:caseId/images ───────────────────────────────
-// Bulk inserts uploaded image paths into case_images
+// POST /api/clinicians/cases/:caseId/images
+// Uploads images to Cloudinary and stores URLs in case_images, updates image_count
 // Verifies the case belongs to this clinician before accepting uploads
-// ─── POST /api/clinicians/cases/:caseId/images ───────────────────────────────
-// Uploads images to Cloudinary and stores URLs in case_images; updates image_count
 export const uploadImagesForCase = async (req, res) => {
   try {
+    // Validate caseId route param
     const caseId = Number(req.params.caseId);
     if (!Number.isInteger(caseId) || caseId <= 0) {
       return res.status(400).json({ message: "Invalid caseId" });
     }
 
+    // Ensure files were uploaded (multer should have populated req.files)
     if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
       return res.status(400).json({ message: "No images uploaded" });
     }
 
-    const userId = req.user.user_id;
+    const userId = req.user.user_id; // from auth middleware (users.user_id)
 
-    // Ownership check — clinician can only upload to their own cases
+    // Ownership check: clinician can only upload to their own cases
     const [rows] = await db.execute(
-      `SELECT c.case_id FROM cases c
+      `SELECT c.case_id
+       FROM cases c
        JOIN clinicians cl ON c.clinician_id = cl.clinician_id
        WHERE c.case_id = ? AND cl.user_id = ?`,
       [caseId, userId]
@@ -924,9 +925,13 @@ export const uploadImagesForCase = async (req, res) => {
       return new Promise((resolve, reject) => {
         cloudinary.uploader
           .upload_stream(
-            { folder: "akomaderma/cases", resource_type: "image" },
+            {
+              folder: "akomaderma/cases", // logical folder in Cloudinary
+              resource_type: "image",
+            },
             (error, result) => {
               if (error) return reject(error);
+              // Store the secure URL in DB
               resolve(result.secure_url);
             }
           )
@@ -934,25 +939,29 @@ export const uploadImagesForCase = async (req, res) => {
       });
     });
 
+    // Wait for all uploads to complete
     const urls = await Promise.all(uploadPromises);
 
     // Insert Cloudinary URLs into case_images (case_id, file_path)
+    // Values shape: [ [caseId, url1], [caseId, url2], ... ]
     const values = urls.map((url) => [caseId, url]);
 
     await db.query("INSERT INTO case_images (case_id, file_path) VALUES ?", [
       values,
     ]);
 
-    // Update image_count on cases table
+    // Update image_count on cases table (denormalised count)
     await db.execute("UPDATE cases SET image_count = ? WHERE case_id = ?", [
       urls.length,
       caseId,
     ]);
 
-    res.status(201).json({ message: "Images uploaded", count: urls.length });
+    return res
+      .status(201)
+      .json({ message: "Images uploaded", count: urls.length });
   } catch (error) {
     console.error("uploadImagesForCase error:", error);
-    res.status(500).json({ message: "Failed to upload images" });
+    return res.status(500).json({ message: "Failed to upload images" });
   }
 };
 
@@ -1118,12 +1127,18 @@ export const getCaseById = async (req, res) => {
        ORDER BY tp.created_at DESC LIMIT 1`,
       [caseId]
     );
-
     // All images for this case ordered by upload time
     const [images] = await db.execute(
       "SELECT id, file_path FROM case_images WHERE case_id = ? ORDER BY created_at ASC",
       [caseId]
     );
+
+    res.json({
+      case: caseRow,
+      diagnosis,
+      treatment,
+      images,
+    });
 
     res.json({ case: caseRow, diagnosis, treatment, images });
   } catch (error) {
