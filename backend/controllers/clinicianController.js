@@ -779,7 +779,7 @@ export const getPatientAIProfile = async (req, res) => {
 // fallback string if OpenAI is unavailable so the page still loads
 async function generatePatientProfile(context) {
   try {
-    // ✅ getOpenAI() called here — not at module load time
+    // getOpenAI() called here — not at module load time
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.3,
@@ -907,9 +907,9 @@ export const uploadImagesForCase = async (req, res) => {
 
     // Ownership check — clinician can only upload to their own cases
     const [rows] = await db.execute(
-      `SELECT c.case_id FROM cases c
-       JOIN clinicians cl ON c.clinician_id = cl.clinician_id
-       WHERE c.case_id = ? AND cl.user_id = ?`,
+      `SELECT c.caseid FROM cases c
+       JOIN clinicians cl ON c.clinicianid = cl.clinicianid
+       WHERE c.caseid = ? AND cl.userid = ?`,
       [caseId, userId]
     );
     if (!rows.length) {
@@ -921,10 +921,7 @@ export const uploadImagesForCase = async (req, res) => {
       return new Promise((resolve, reject) => {
         cloudinary.uploader
           .upload_stream(
-            {
-              folder: "akomaderma/cases",
-              resource_type: "image",
-            },
+            { folder: "akomaderma/cases", resource_type: "image" },
             (error, result) => {
               if (error) return reject(error);
               resolve(result.secure_url);
@@ -936,15 +933,15 @@ export const uploadImagesForCase = async (req, res) => {
 
     const urls = await Promise.all(uploadPromises);
 
-    // Bulk insert all URLs in a single query
+    // Insert Cloudinary URLs into existing table/columns
     const values = urls.map((url) => [caseId, url]);
 
-    await db.query("INSERT INTO case_images (case_id, file_path) VALUES ?", [
+    await db.query("INSERT INTO caseimages (caseid, filepath) VALUES ?", [
       values,
     ]);
 
-    // Optionally update image_count on cases
-    await db.execute("UPDATE cases SET image_count = ? WHERE case_id = ?", [
+    // Update imagecount on cases table
+    await db.execute("UPDATE cases SET imagecount = ? WHERE caseid = ?", [
       urls.length,
       caseId,
     ]);
