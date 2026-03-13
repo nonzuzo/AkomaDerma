@@ -2,9 +2,9 @@
 import { getIO } from "../config/socket.js";
 import db from "../config/db.js";
 import OpenAI from "openai";
+
 import { v2 as cloudinary } from "cloudinary";
 
-// Cloudinary configuration — reads from env vars
 console.log("Cloudinary env check:", {
   cloud: process.env.CLOUDINARY_CLOUD_NAME,
   keyPresent: !!process.env.CLOUDINARY_API_KEY,
@@ -17,7 +17,8 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Lazy OpenAI init — only throws if AI is actually called
+// gi Lazy init — only throws when AI is actually called, not on server startup
+// Prevents Railway crash when OPENAI_API_KEY is missing from environment
 const getOpenAI = () => {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set in environment variables");
@@ -60,7 +61,7 @@ export const getClinicianMe = async (req, res) => {
       role: row.role,
       clinicianId: row.clinician_id,
       clinicName: row.clinic_name || "Clinic",
-      // nested object for components that expect clinician.clinician_id
+      // nested clinician object kept for components that destructure it
       clinician: {
         clinician_id: row.clinician_id,
         clinic_name: row.clinic_name || "Clinic",
@@ -72,8 +73,9 @@ export const getClinicianMe = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/dashboard ────────────────────────────────────────────
-// Aggregates stats, next appointment, upcoming list and notifications
+// ─── GET /api/clinicians/dashboard ───────────────────────────────────────────
+// Aggregates all stats, next appointment, upcoming list and notifications
+// into a single payload to minimise frontend round trips
 export const getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -82,6 +84,7 @@ export const getDashboardStats = async (req, res) => {
     if (!clinicianId)
       return res.status(404).json({ error: "Clinician profile not found" });
 
+    // Basic identity for the dashboard header
     const [[clinicianInfo]] = await db.execute(
       `SELECT c.clinic_name, u.full_name
        FROM clinicians c JOIN users u ON c.user_id = u.user_id
@@ -89,6 +92,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Today's appointment count (excludes cancelled/no-show)
     const [[{ appointmentsToday }]] = await db.execute(
       `SELECT COUNT(*) AS appointmentsToday
        FROM appointments
@@ -98,6 +102,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Patients currently checked in — used for live queue display
     const [[{ checkedInNow }]] = await db.execute(
       `SELECT COUNT(*) AS checkedInNow
        FROM appointments
@@ -107,6 +112,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Walk-in patients still waiting (booked or checked-in today)
     const [[{ walkInQueue }]] = await db.execute(
       `SELECT COUNT(*) AS walkInQueue
        FROM appointments a
@@ -118,6 +124,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Cases opened today
     const [[{ casesCreatedToday }]] = await db.execute(
       `SELECT COUNT(*) AS casesCreatedToday
        FROM cases
@@ -126,6 +133,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Cases waiting for dermatologist review
     const [[{ sentToDerm }]] = await db.execute(
       `SELECT COUNT(*) AS sentToDerm
        FROM cases
@@ -133,6 +141,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Cases with treatment plan ready for clinician to action
     const [[{ treatmentReady }]] = await db.execute(
       `SELECT COUNT(*) AS treatmentReady
        FROM cases
@@ -140,6 +149,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // All-time completed cases count
     const [[{ completedCases }]] = await db.execute(
       `SELECT COUNT(*) AS completedCases
        FROM cases
@@ -147,6 +157,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Today's pending (not yet checked-in) appointments
     const [[{ pendingAppointments }]] = await db.execute(
       `SELECT COUNT(*) AS pendingAppointments
        FROM appointments
@@ -156,6 +167,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // The very next upcoming appointment for the "Next Up" card
     const [nextApptRows] = await db.execute(
       `SELECT
          a.appointment_id,
@@ -174,6 +186,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Today's upcoming list shown in the dashboard timeline (max 5)
     const [upcomingToday] = await db.execute(
       `SELECT
          a.appointment_id,
@@ -193,6 +206,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Latest 10 notifications — unread first, then newest
     const [notifications] = await db.execute(
       `SELECT notification_id, message, type, is_read, created_at
        FROM notifications
@@ -202,6 +216,7 @@ export const getDashboardStats = async (req, res) => {
       [clinicianId]
     );
 
+    // Unread badge count for the notification bell icon
     const [[{ unreadCount }]] = await db.execute(
       `SELECT COUNT(*) AS unreadCount
        FROM notifications
@@ -236,13 +251,14 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/notifications ────────────────────────────────────────
-// Returns full notification list + unread count
+// ─── GET /api/clinicians/notifications ───────────────────────────────────────
+// Returns full notification list + unread count for the notifications panel
 export const getNotifications = async (req, res) => {
   try {
     const userId = req.user.user_id;
     const clinicianId = await getClinicianId(userId);
 
+    // Return empty state gracefully if clinician record doesn't exist yet
     if (!clinicianId) return res.json({ notifications: [], unreadCount: 0 });
 
     const [notifications] = await db.execute(
@@ -268,8 +284,8 @@ export const getNotifications = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/notifications/count ──────────────────────────────────
-// Lightweight endpoint — only returns badge count
+// ─── GET /api/clinicians/notifications/count ─────────────────────────────────
+// Lightweight endpoint — only returns the badge count, polled frequently
 export const getNotificationCount = async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -291,8 +307,8 @@ export const getNotificationCount = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/clinicians/notifications/:id/read ─────────────────────────────
-// Marks a single notification as read
+// ─── PATCH /api/clinicians/notifications/:id/read ────────────────────────────
+// Marks a single notification as read when user clicks it
 export const markNotificationRead = async (req, res) => {
   try {
     const { id } = req.params;
@@ -302,6 +318,7 @@ export const markNotificationRead = async (req, res) => {
     if (!clinicianId)
       return res.status(404).json({ error: "Clinician not found" });
 
+    // clinician_id check prevents marking another clinician's notification
     await db.execute(
       "UPDATE notifications SET is_read = 1 WHERE notification_id = ? AND clinician_id = ?",
       [id, clinicianId]
@@ -314,8 +331,8 @@ export const markNotificationRead = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/clinicians/notifications/read-all ─────────────────────────────
-// Marks all notifications as read
+// ─── PATCH /api/clinicians/notifications/read-all ────────────────────────────
+// Marks all unread notifications as read — triggered by "Mark all read" button
 export const markAllNotificationsRead = async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -336,8 +353,8 @@ export const markAllNotificationsRead = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/profile ──────────────────────────────────────────────
-// Used by profile/settings page — enforces clinician role
+// ─── GET /api/clinicians/profile ─────────────────────────────────────────────
+// Used by profile/settings page — verifies role before returning data
 export const getClinicianProfile = async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -348,6 +365,7 @@ export const getClinicianProfile = async (req, res) => {
     );
     if (!users.length) return res.status(404).json({ error: "User not found" });
 
+    // Guard: only clinician role users should access this endpoint
     if (users[0].role !== "clinician")
       return res.status(403).json({ error: "User is not a clinician" });
 
@@ -371,8 +389,9 @@ export const getClinicianProfile = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinicians/patients/new ────────────────────────────────────────
-// Creates a new patient; enforces unique phone per DB
+// ─── POST /api/clinicians/patients/new ───────────────────────────────────────
+// Creates a new patient record — uses a transaction to ensure atomicity
+// Strips non-numeric chars from phone and validates sex enum before insert
 export const createNewPatient = async (req, res) => {
   let connection;
   try {
@@ -397,8 +416,10 @@ export const createNewPatient = async (req, res) => {
       return res.status(404).json({ message: "Clinician not found" });
     }
 
+    // Strip all non-numeric characters for consistent phone storage
     const cleanPhone = phone.replace(/\D/g, "");
 
+    // Check for duplicate phone number across all patients
     const [existing] = await connection.execute(
       "SELECT patient_id FROM patients WHERE contact_info = ?",
       [cleanPhone]
@@ -411,6 +432,7 @@ export const createNewPatient = async (req, res) => {
       });
     }
 
+    // Sanitise gender — reject invalid values rather than storing garbage
     const safeSex = ["male", "female", "other"].includes(gender?.toLowerCase())
       ? gender.toLowerCase()
       : null;
@@ -441,6 +463,7 @@ export const createNewPatient = async (req, res) => {
   } catch (error) {
     if (connection) await connection.rollback();
     console.error("createNewPatient error:", error);
+    // Return user-friendly messages for known MySQL error codes
     const msg =
       error.code === "ER_DUP_ENTRY"
         ? "Phone number already registered"
@@ -449,12 +472,14 @@ export const createNewPatient = async (req, res) => {
         : "Failed to create patient";
     res.status(500).json({ message: msg });
   } finally {
+    // Always release connection back to pool
     if (connection) connection.release();
   }
 };
 
-// ─── GET /api/clinicians/patients/search ──────────────────────────────────────
-// When q is empty: recent patients; otherwise search name/phone/id
+// ─── GET /api/clinicians/patients/search ─────────────────────────────────────
+// Returns recent patients when no query given, otherwise searches by
+// name, phone, or patient ID — limit is clamped between 1 and 50
 export const searchPatients = async (req, res) => {
   try {
     const { q = "" } = req.query;
@@ -465,12 +490,14 @@ export const searchPatients = async (req, res) => {
 
     const userId = req.user.user_id;
     const clinicianId = await getClinicianId(userId);
+
     if (!clinicianId)
       return res.status(404).json({ message: "Clinician not found" });
 
-    const term = String(q).trim();
+    const term = q.trim();
     const like = `%${term}%`;
 
+    // No search term — return most recently registered patients
     if (!term) {
       const [recent] = await db.execute(
         `SELECT
@@ -487,6 +514,7 @@ export const searchPatients = async (req, res) => {
       return res.json({ patients: recent });
     }
 
+    // Search by first name, last name, phone or patient_id
     const [patients] = await db.execute(
       `SELECT
          patient_id,
@@ -515,8 +543,8 @@ export const searchPatients = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/patients/:patientId ──────────────────────────────────
-// Returns a single patient record; enforces clinician ownership
+// ─── GET /api/clinicians/patients/:patientId ─────────────────────────────────
+// Returns a single patient record — enforces clinician ownership
 export const getPatientById = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -525,6 +553,7 @@ export const getPatientById = async (req, res) => {
 
     const userId = req.user.user_id;
     const clinicianId = await getClinicianId(userId);
+
     if (!clinicianId)
       return res.status(404).json({ message: "Clinician not found" });
 
@@ -547,8 +576,9 @@ export const getPatientById = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/patients/:patientId/cases ────────────────────────────
-// Returns case history for a patient (used in patient detail view)
+// ─── GET /api/clinicians/patients/:patientId/cases ───────────────────────────
+// Returns case history for the patient detail view
+// Extracts bp/temp/weight from vitals_json for easy frontend consumption
 export const getPatientCases = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -557,6 +587,7 @@ export const getPatientCases = async (req, res) => {
 
     const userId = req.user.user_id;
     const clinicianId = await getClinicianId(userId);
+
     if (!clinicianId)
       return res.status(404).json({ message: "Clinician not found" });
 
@@ -583,8 +614,9 @@ export const getPatientCases = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinicians/patients/:patientId/ai-profile ──────────────────────
-// Builds a structured patient context and asks OpenAI for a 3‑paragraph summary
+// ─── POST /api/clinicians/patients/:patientId/ai-profile ─────────────────────
+// Fetches all patient data then sends it to OpenAI for a clinical assessment
+// Falls back to a static message if OpenAI is unavailable
 export const getPatientAIProfile = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -595,6 +627,7 @@ export const getPatientAIProfile = async (req, res) => {
     if (!clinicianId)
       return res.status(404).json({ message: "Clinician not found" });
 
+    // ── Fetch all patient data from DB in parallel ────────────────────────
     const [patients] = await db.execute(
       `SELECT first_name, last_name, date_of_birth, sex, contact_info
        FROM patients WHERE patient_id = ? AND clinician_id = ?`,
@@ -604,12 +637,14 @@ export const getPatientAIProfile = async (req, res) => {
       return res.status(404).json({ message: "Patient not found" });
 
     const p = patients[0];
+    // Calculate age in years from date_of_birth
     const age = p.date_of_birth
       ? Math.floor(
           (Date.now() - new Date(p.date_of_birth).getTime()) / 3.156e10
         )
       : null;
 
+    // Most recent case only — used for current status section
     const [cases] = await db.execute(
       `SELECT case_id, chief_complaint, lesion_location,
               lesion_type, symptoms, status, created_at
@@ -619,6 +654,7 @@ export const getPatientAIProfile = async (req, res) => {
       [patientId, clinicianId]
     );
 
+    // Last 3 diagnoses — gives AI historical context
     const [diagnoses] = await db.execute(
       `SELECT d.final_diagnosis, d.notes, d.approved_at,
               u.full_name AS dermatologist_name
@@ -631,6 +667,7 @@ export const getPatientAIProfile = async (req, res) => {
       [patientId]
     );
 
+    // Most recent approved treatment plan
     const [treatments] = await db.execute(
       `SELECT tp.medications, tp.lifestyle_advice,
               tp.follow_up_instructions, tp.created_at
@@ -661,6 +698,7 @@ export const getPatientAIProfile = async (req, res) => {
       [patientId]
     );
 
+    // ── Build structured context object for the OpenAI prompt ─────────────
     const patientContext = {
       name: `${p.first_name} ${p.last_name}`,
       age: age ?? "unknown",
@@ -699,8 +737,10 @@ export const getPatientAIProfile = async (req, res) => {
       ),
     };
 
+    // ── Call OpenAI — wrapped in its own function for reuse/testing ───────
     const aiAssessment = await generatePatientProfile(patientContext);
 
+    // ── Return in the same shape the frontend already expects ─────────────
     return res.json({
       full_name: `${p.first_name} ${p.last_name}`,
       demographics: {
@@ -725,6 +765,7 @@ export const getPatientAIProfile = async (req, res) => {
             .map((m) => `${m.medication_name} ${m.dosage}`)
             .join(", ") || "None recorded",
       },
+      // AI-generated 3-paragraph clinical assessment
       ai_clinical_assessment: aiAssessment,
     });
   } catch (error) {
@@ -733,9 +774,12 @@ export const getPatientAIProfile = async (req, res) => {
   }
 };
 
-// OpenAI helper — returns a safe fallback on error
+// ─── OpenAI patient profile generator ────────────────────────────────────────
+// Generates a 3-paragraph clinical assessment — never throws, returns
+// fallback string if OpenAI is unavailable so the page still loads
 async function generatePatientProfile(context) {
   try {
+    // getOpenAI() called here — not at module load time
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.3,
@@ -746,7 +790,7 @@ async function generatePatientProfile(context) {
           content:
             "You are a clinical AI assistant supporting a clinician in a teledermatology system. " +
             "Given a patient's structured medical data, write a concise clinical assessment. " +
-            "Structure your response in exactly 3 short paragraphs:\n" +
+            "Structure your response in exactly 3 short paragraphs: \n" +
             "1. CLINICAL SUMMARY: Who is this patient and what is their skin condition history.\n" +
             "2. CURRENT STATUS: What is happening right now — active case, pending results, or treatment progress.\n" +
             "3. RECOMMENDATION: One clear action the clinician should prioritise today.\n" +
@@ -773,8 +817,9 @@ async function generatePatientProfile(context) {
   }
 }
 
-// ─── POST /api/clinicians/cases/submit ────────────────────────────────────────
-// Creates a new case and notifies clinician; used by your wizard Step 5
+// ─── POST /api/clinicians/cases/submit ───────────────────────────────────────
+// Creates a new case and immediately sends a notification to the clinician
+// Uses a transaction so case + notification either both save or both rollback
 export const submitCase = async (req, res) => {
   let connection;
   try {
@@ -820,6 +865,7 @@ export const submitCase = async (req, res) => {
       ]
     );
 
+    // Notify the clinician that their case was submitted successfully
     await connection.execute(
       `INSERT INTO notifications (clinician_id, message, type)
        VALUES (?, ?, 'case_update')`,
@@ -843,7 +889,10 @@ export const submitCase = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinicians/cases/:caseId/images ────────────────────────────────
+// ─── POST /api/clinicians/cases/:caseId/images ───────────────────────────────
+// Bulk inserts uploaded image paths into case_images
+// Verifies the case belongs to this clinician before accepting uploads
+// ─── POST /api/clinicians/cases/:caseId/images ───────────────────────────────
 // Uploads images to Cloudinary and stores URLs in case_images; updates image_count
 export const uploadImagesForCase = async (req, res) => {
   try {
@@ -858,14 +907,14 @@ export const uploadImagesForCase = async (req, res) => {
 
     const userId = req.user.user_id;
 
-    // Ownership check — ensure case belongs to this clinician
+    // Ownership check — clinician can only upload to their own cases
     const [rows] = await db.execute(
-      `SELECT c.case_id
-       FROM cases c
+      `SELECT c.case_id FROM cases c
        JOIN clinicians cl ON c.clinician_id = cl.clinician_id
        WHERE c.case_id = ? AND cl.user_id = ?`,
       [caseId, userId]
     );
+
     if (!rows.length) {
       return res.status(403).json({ message: "Not allowed for this case" });
     }
@@ -894,7 +943,7 @@ export const uploadImagesForCase = async (req, res) => {
       values,
     ]);
 
-    // Update denormalized image_count on cases
+    // Update image_count on cases table
     await db.execute("UPDATE cases SET image_count = ? WHERE case_id = ?", [
       urls.length,
       caseId,
@@ -907,8 +956,9 @@ export const uploadImagesForCase = async (req, res) => {
   }
 };
 
-// ─── PUT /api/clinicians/patients/:patientId/vitals ───────────────────────────
+// ─── PUT /api/clinicians/patients/:patientId/vitals ──────────────────────────
 // Updates vitals_json on the most recent case for a patient
+// Stores vitals as JSON — keys: bp, temp, weight, etc.
 export const updateLatestCaseVitals = async (req, res) => {
   try {
     const patientId = Number(req.params.patientId);
@@ -925,6 +975,7 @@ export const updateLatestCaseVitals = async (req, res) => {
     if (!clinicianId)
       return res.status(404).json({ message: "Clinician not found" });
 
+    // Target only the most recent case for this patient
     const [cases] = await db.execute(
       `SELECT case_id FROM cases
        WHERE patient_id = ? AND clinician_id = ?
@@ -949,7 +1000,7 @@ export const updateLatestCaseVitals = async (req, res) => {
 };
 
 // ─── GET /api/clinicians/cases ────────────────────────────────────────────────
-// Returns all cases for the clinician — used by cases list page
+// Returns all cases for the clinician — used by the cases list page
 export const getCases = async (req, res) => {
   try {
     const clinicianId = await getClinicianId(req.user.user_id);
@@ -981,7 +1032,8 @@ export const getCases = async (req, res) => {
 };
 
 // ─── GET /api/clinicians/patients ─────────────────────────────────────────────
-// Returns all patients for clinician, optional ?filter=walkin
+// Returns all patients — supports ?filter=walkin for walk-in queue view
+// Includes case count per patient for the patient list table
 export const getPatients = async (req, res) => {
   try {
     const clinicianId = await getClinicianId(req.user.user_id);
@@ -990,6 +1042,7 @@ export const getPatients = async (req, res) => {
 
     const { filter } = req.query;
 
+    // Base query — matches both direct clinician_id and created_by for backward compat
     let query = `
       SELECT
         p.patient_id,
@@ -1008,6 +1061,7 @@ export const getPatients = async (req, res) => {
     `;
     const queryParams = [clinicianId, clinicianId];
 
+    // Optional filter for walk-in patients only
     if (filter === "walkin") query += " AND p.is_walkin = 1";
 
     query += " ORDER BY p.created_at DESC";
@@ -1021,8 +1075,8 @@ export const getPatients = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/cases/:caseId ────────────────────────────────────────
-// Returns full case detail including diagnosis, treatment and images
+// ─── GET /api/clinicians/cases/:caseId ───────────────────────────────────────
+// Returns full case detail including diagnosis, treatment plan and images
 export const getCaseById = async (req, res) => {
   try {
     const caseId = Number(req.params.caseId);
@@ -1044,6 +1098,7 @@ export const getCaseById = async (req, res) => {
     );
     if (!caseRow) return res.status(404).json({ message: "Case not found" });
 
+    // Most recent diagnosis from a dermatologist
     const [[diagnosis = null]] = await db.execute(
       `SELECT d.*, CONCAT(u.full_name) AS dermatologist_name
        FROM diagnoses d
@@ -1054,6 +1109,7 @@ export const getCaseById = async (req, res) => {
       [caseId]
     );
 
+    // Most recent treatment plan linked to this case
     const [[treatment = null]] = await db.execute(
       `SELECT tp.*
        FROM treatment_plans tp
@@ -1063,6 +1119,7 @@ export const getCaseById = async (req, res) => {
       [caseId]
     );
 
+    // All images for this case ordered by upload time
     const [images] = await db.execute(
       "SELECT id, file_path FROM case_images WHERE case_id = ? ORDER BY created_at ASC",
       [caseId]
@@ -1075,8 +1132,9 @@ export const getCaseById = async (req, res) => {
   }
 };
 
-// ─── POST /api/clinicians/billing ─────────────────────────────────────────────
-// Creates a billing record and marks the case as completed
+// ─── POST /api/clinicians/billing ────────────────────────────────────────────
+// Creates a billing record and marks the case as completed atomically
+// Payment method is mapped from frontend values to DB ENUM values
 export const createInvoice = async (req, res) => {
   const userId = req.user.user_id;
   const clinicianId = await getClinicianId(userId);
@@ -1099,6 +1157,7 @@ export const createInvoice = async (req, res) => {
       .status(400)
       .json({ message: "Missing required billing fields." });
 
+  // Map frontend payment method keys to DB ENUM values
   const methodMap = {
     cash: "cash",
     momo: "momo",
@@ -1127,6 +1186,7 @@ export const createInvoice = async (req, res) => {
       ]
     );
 
+    // Mark the case as completed when payment is recorded
     await connection.execute(
       "UPDATE cases SET status = 'completed' WHERE case_id = ?",
       [case_id]
@@ -1147,8 +1207,8 @@ export const createInvoice = async (req, res) => {
   }
 };
 
-// ─── GET /api/clinicians/billing ──────────────────────────────────────────────
-// Returns all invoices for this clinician
+// ─── GET /api/clinicians/billing ─────────────────────────────────────────────
+// Returns all invoices for this clinician — used by the billing list page
 export const getInvoices = async (req, res) => {
   const userId = req.user.user_id;
   const clinicianId = await getClinicianId(userId);
@@ -1183,7 +1243,7 @@ export const getInvoices = async (req, res) => {
 };
 
 // ─── GET /api/clinicians/billing/:invoiceId ───────────────────────────────────
-// Returns a single invoice with patient contact
+// Returns a single invoice with patient contact — used for the invoice detail/print view
 export const getInvoiceById = async (req, res) => {
   const userId = req.user.user_id;
   const clinicianId = await getClinicianId(userId);
@@ -1214,8 +1274,8 @@ export const getInvoiceById = async (req, res) => {
   }
 };
 
-// ─── PATCH /api/clinicians/billing/:invoiceId/status ──────────────────────────
-// Updates payment_status; only allows pending/paid/waived
+// ─── PATCH /api/clinicians/billing/:invoiceId/status ─────────────────────────
+// Updates payment status — only allows pending/paid/waived transitions
 export const updateInvoiceStatus = async (req, res) => {
   const userId = req.user.user_id;
   const clinicianId = await getClinicianId(userId);
