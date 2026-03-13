@@ -405,42 +405,47 @@ export default function CaseReviewPage() {
               </div>
             ) : (
               <div style={s.imageGrid}>
-                {images.map((img, idx) => (
-                  <div
-                    key={img.id}
-                    style={s.imageWrap}
-                    onClick={() => {
-                      setLightboxIdx(idx);
-                      setLightbox(true);
-                    }}
-                    onMouseEnter={(e) => {
-                      const overlay = e.currentTarget.querySelector(
-                        ".img-overlay"
-                      ) as HTMLElement;
-                      if (overlay) overlay.style.opacity = "1";
-                    }}
-                    onMouseLeave={(e) => {
-                      const overlay = e.currentTarget.querySelector(
-                        ".img-overlay"
-                      ) as HTMLElement;
-                      if (overlay) overlay.style.opacity = "0";
-                    }}
-                  >
-                    <img
-                      src={imageUrl(img.file_path)}
-                      alt={`Lesion ${idx + 1}`}
-                      style={s.image}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src =
-                          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23f1f5f9'/%3E%3C/svg%3E";
+                {images.map((img, idx) => {
+                  const src = imageUrl(img.file_path);
+                  console.log("DERM IMAGE SRC", idx, src, img.file_path);
+                  return (
+                    <div
+                      key={img.id}
+                      style={s.imageWrap}
+                      onClick={() => {
+                        setLightboxIdx(idx);
+                        setLightbox(true);
                       }}
-                    />
-                    <div className="img-overlay" style={s.imageOverlay}>
-                      <ZoomIn size={20} style={{ color: "#fff" }} />
+                      onMouseEnter={(e) => {
+                        const overlay = e.currentTarget.querySelector(
+                          ".img-overlay"
+                        ) as HTMLElement;
+                        if (overlay) overlay.style.opacity = "1";
+                      }}
+                      onMouseLeave={(e) => {
+                        const overlay = e.currentTarget.querySelector(
+                          ".img-overlay"
+                        ) as HTMLElement;
+                        if (overlay) overlay.style.opacity = "0";
+                      }}
+                    >
+                      <img
+                        src={src}
+                        alt={`Lesion ${idx + 1}`}
+                        style={s.image}
+                        onError={(e) => {
+                          console.error("IMG ERROR for", src);
+                          (e.target as HTMLImageElement).src =
+                            "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23f1f5f9'/%3E%3C/svg%3E";
+                        }}
+                      />
+                      <div className="img-overlay" style={s.imageOverlay}>
+                        <ZoomIn size={20} style={{ color: "#fff" }} />
+                      </div>
+                      <div style={s.imageLabel}>Image {idx + 1}</div>
                     </div>
-                    <div style={s.imageLabel}>Image {idx + 1}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
