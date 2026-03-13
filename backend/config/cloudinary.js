@@ -1,6 +1,9 @@
+// middleware/uploadMiddleware.js
 import { v2 as cloudinary } from "cloudinary";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
 import multer from "multer";
+import pkg from "multer-storage-cloudinary";
+
+const { CloudinaryStorage } = pkg;
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -17,4 +20,13 @@ const storage = new CloudinaryStorage({
   },
 });
 
-export const upload = multer({ storage });
+const imageFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/")) cb(null, true);
+  else cb(new Error("Only image files are allowed"), false);
+};
+
+export const uploadCaseImages = multer({
+  storage,
+  fileFilter: imageFilter,
+  limits: { files: 5, fileSize: 10 * 1024 * 1024 },
+});
