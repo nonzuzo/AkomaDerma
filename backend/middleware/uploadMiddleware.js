@@ -3,11 +3,13 @@ import { v2 as cloudinary } from "cloudinary";
 import multer from "multer";
 import pkg from "multer-storage-cloudinary";
 
-const { CloudinaryStorage } = pkg;
+console.log("multer-storage-cloudinary pkg keys:", Object.keys(pkg));
+
+const CloudinaryStorage = pkg.CloudinaryStorage || pkg.default || pkg; // handle different export shapes
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
@@ -28,5 +30,5 @@ const imageFilter = (req, file, cb) => {
 export const uploadCaseImages = multer({
   storage,
   fileFilter: imageFilter,
-  limits: { files: 5, fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { files: 5, fileSize: 10 * 1024 * 1024 },
 });
