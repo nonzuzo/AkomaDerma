@@ -825,7 +825,7 @@ export const submitCase = async (req, res) => {
   try {
     const {
       patient_id,
-      vitals,
+      vitals, // now an object from frontend
       chief_complaint,
       lesion_duration,
       lesion_location,
@@ -859,7 +859,8 @@ export const submitCase = async (req, res) => {
         prior_treatment || null,
         lesion_location || null,
         lesion_type || null,
-        vitals || null,
+        // store vitals as proper JSON or NULL
+        vitals ? JSON.stringify(vitals) : null,
         image_count || 0,
         parent_case_id || null,
       ]
@@ -931,7 +932,7 @@ export const uploadImagesForCase = async (req, res) => {
             },
             (error, result) => {
               if (error) return reject(error);
-              // Store the secure URL in DB
+              // result.secure_url is the https URL we store in DB
               resolve(result.secure_url);
             }
           )
@@ -950,11 +951,16 @@ export const uploadImagesForCase = async (req, res) => {
       values,
     ]);
 
-    // Update image_count on cases table (denormalised count)
-    await db.execute("UPDATE cases SET image_count = ? WHERE case_id = ?", [
-      urls.length,
-      caseId,
-    ]);
+    // Update image_count and image_path on cases table:
+    // - image_count is incremented
+    // - image_path is set to first image if currently NULL (primary thumbnail)
+    await db.execute(
+      `UPDATE cases
+       SET image_count = image_count + ?,
+           image_path  = COALESCE(image_path, ?)
+       WHERE case_id = ?`,
+      [urls.length, urls[0], caseId]
+    );
 
     return res
       .status(201)

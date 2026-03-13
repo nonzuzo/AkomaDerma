@@ -192,7 +192,7 @@ export default function ClinicianCreateCase() {
     setSubmitError("");
 
     try {
-      // ── Step A: Create the case ─────────────────────────────────────────
+      // ── Step A: Create the case (JSON body only, no files here) ──────────
       console.log("📤 Submitting case to backend...");
       const caseRes = await fetch(`${API}/clinicians/cases/submit`, {
         method: "POST",
@@ -202,7 +202,8 @@ export default function ClinicianCreateCase() {
         },
         body: JSON.stringify({
           patient_id: parseInt(formData.patientPid),
-          vitals: JSON.stringify(formData.vitals),
+          // IMPORTANT: send vitals as an object; backend will JSON.stringify
+          vitals: formData.vitals,
           chief_complaint: formData.chiefComplaint,
           lesion_duration: formData.lesionDuration,
           lesion_location: formData.lesionLocation,
@@ -223,16 +224,20 @@ export default function ClinicianCreateCase() {
       const caseId = caseData.case_id;
       console.log("✅ Case created with ID:", caseId);
 
-      // ── Step B: Upload images ───────────────────────────────────────────
+      // ── Step B: Upload images (multipart/form-data) ──────────────────────
       // Do NOT set Content-Type manually — browser sets it automatically
       // with the correct multipart boundary when body is FormData
       console.log("⬆️ Uploading images for case:", caseId);
       const imageFormData = new FormData();
-      images.forEach((img) => imageFormData.append("images", img));
+
+      // Enforce the same max-5 rule on the client as multer does on the server
+      images.slice(0, 5).forEach((img) => {
+        imageFormData.append("images", img); // field name must match .array("images", 5)
+      });
 
       const imgRes = await fetch(`${API}/clinicians/cases/${caseId}/images`, {
         method: "POST",
-        headers: auth(), // ← auth only, NO Content-Type header
+        headers: auth(), // auth only, NO Content-Type header
         body: imageFormData,
       });
 
@@ -519,14 +524,26 @@ function Step4({
   images: File[];
   setImages: React.Dispatch<React.SetStateAction<File[]>>;
 }) {
+  // Drop handler with max-5 enforcement to match multer limits
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    setImages((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+    setImages((prev) => {
+      const combined = [...prev, ...Array.from(e.dataTransfer.files)];
+      // Hard cap at 5 images — prevents multer "Too many files" error on backend
+      return combined.slice(0, 5);
+    });
   };
 
+  // File chooser handler with max-5 enforcement
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files)
-      setImages((prev) => [...prev, ...Array.from(e.target.files!)]);
+    if (e.target.files) {
+      setImages((prev) => {
+        const combined = [...prev, ...Array.from(e.target.files!)];
+        return combined.slice(0, 5);
+      });
+      // Reset input so selecting the same file again will trigger onChange
+      e.target.value = "";
+    }
   };
 
   const removeImage = (index: number) => {
@@ -545,7 +562,7 @@ function Step4({
       >
         <Upload size={48} style={dropIcon} />
         <h3 style={dropTitle}>Drag & drop images here</h3>
-        <p style={dropText}>JPG, PNG (max 10MB total, up to 5 images)</p>
+        <p style={dropText}>JPG, PNG (max 10MB per image, up to 5 images)</p>
         <input
           type="file"
           multiple
@@ -566,28 +583,45 @@ function Step4({
           Browse Files
         </button>
       </div>
+
       {images.length > 0 && (
         <div style={imagePreview}>
           <h4 style={{ margin: "0 0 1rem 0" }}>
-            {images.length} image(s) selected
+            {images.length}/5 image(s) selected
+            {images.length === 5 && (
+              <span
+                style={{
+                  color: "#f59e0b",
+                  fontSize: "0.8rem",
+                  marginLeft: "0.5rem",
+                }}
+              >
+                (Maximum reached)
+              </span>
+            )}
           </h4>
           <div style={previewGrid}>
-            {images.slice(0, 5).map((img, idx) => (
-              <div key={idx} style={previewItem}>
-                <img
-                  src={URL.createObjectURL(img)}
-                  style={previewImage}
-                  alt={`Preview ${idx + 1}`}
-                />
-                <button
-                  type="button"
-                  style={removeBtn}
-                  onClick={() => removeImage(idx)}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {images.slice(0, 5).map((img, idx) => {
+              const url = URL.createObjectURL(img);
+              return (
+                <div key={idx} style={previewItem}>
+                  <img
+                    src={url}
+                    style={previewImage}
+                    alt={`Preview ${idx + 1}`}
+                    // Revoke object URL after load to avoid memory leaks
+                    onLoad={() => URL.revokeObjectURL(url)}
+                  />
+                  <button
+                    type="button"
+                    style={removeBtn}
+                    onClick={() => removeImage(idx)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

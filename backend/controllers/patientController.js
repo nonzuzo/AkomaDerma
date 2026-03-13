@@ -4,7 +4,7 @@ import db from "../config/db.js";
 export const searchPatients = async (req, res) => {
   try {
     const { q } = req.query;
-    const userId = req.user.user_id; // ← Match your auth middleware
+    const userId = req.user.user_id; // Match with the auth middleware
 
     // Get clinician_id first (like clinicianController)
     const [clinicians] = await db.execute(
