@@ -5,6 +5,12 @@ import OpenAI from "openai";
 
 import { v2 as cloudinary } from "cloudinary";
 
+console.log("Cloudinary env check:", {
+  cloud: process.env.CLOUDINARY_CLOUD_NAME,
+  keyPresent: !!process.env.CLOUDINARY_API_KEY,
+  secretPresent: !!process.env.CLOUDINARY_API_SECRET,
+});
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
