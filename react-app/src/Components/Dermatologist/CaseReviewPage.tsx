@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 const API = `${import.meta.env.VITE_API_URL}`;
-const IMG_URL = import.meta.env.VITE_UPLOADS_URL;   // to serve images from backend uploads folder, which may be different from API URL in production (e.g. using a CDN or separate media server)
+const IMG_URL = import.meta.env.VITE_UPLOADS_URL; // to serve images from backend uploads folder, which may be different from API URL in production (e.g. using a CDN or separate media server)
 const token = () => localStorage.getItem("token") ?? "";
 const auth = () => ({ Authorization: `Bearer ${token()}` });
 
@@ -153,7 +153,10 @@ export default function CaseReviewPage() {
     return "#fee2e2";
   };
 
-  const imageUrl = (path: string) => `${IMG_URL}/${path.replace(/\\/g, "/")}`;
+  const imageUrl = (path: string) =>
+    path.startsWith("http://") || path.startsWith("https://")
+      ? path
+      : `${IMG_URL}/${path.replace(/\\/g, "/")}`;
 
   const vitals = caseData?.vitals_json
     ? typeof caseData.vitals_json === "string"
