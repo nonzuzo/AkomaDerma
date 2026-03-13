@@ -907,9 +907,9 @@ export const uploadImagesForCase = async (req, res) => {
 
     // Ownership check — clinician can only upload to their own cases
     const [rows] = await db.execute(
-      `SELECT c.caseid FROM cases c
-       JOIN clinicians cl ON c.clinicianid = cl.clinicianid
-       WHERE c.caseid = ? AND cl.userid = ?`,
+      `SELECT c.case_id FROM cases c
+       JOIN clinicians cl ON c.clinician_id = cl.clinician_id
+       WHERE c.case_id = ? AND cl.user_id = ?`,
       [caseId, userId]
     );
     if (!rows.length) {
