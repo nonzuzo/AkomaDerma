@@ -153,10 +153,22 @@ export default function CaseReviewPage() {
     return "#fee2e2";
   };
 
-  const imageUrl = (path: string) =>
-    path.startsWith("http://") || path.startsWith("https://")
-      ? path
-      : `${IMG_URL}/${path.replace(/\\/g, "/")}`;
+  const imageUrl = (path: string) => {
+    if (!path) return "";
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      return path;
+    }
+
+    const cleanedPath = path.replace(/\\/g, "/");
+
+    // If backend already sent an absolute path starting with `/`
+    if (cleanedPath.startsWith("/")) {
+      return `${IMG_URL?.replace(/\/$/, "")}${cleanedPath}`;
+    }
+
+    // For relative paths like `uploads/foo.png` or `foo.png`
+    return `${IMG_URL?.replace(/\/$/, "")}/${cleanedPath}`;
+  };
 
   const vitals = caseData?.vitals_json
     ? typeof caseData.vitals_json === "string"
@@ -437,6 +449,21 @@ export default function CaseReviewPage() {
                           console.error("IMG ERROR for", src);
                           (e.target as HTMLImageElement).src =
                             "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23f1f5f9'/%3E%3C/svg%3E";
+                        }}
+                        // to be removed once we have proper image URLs from backend in production, currently needed to handle local file paths from backend during development which cannot be loaded directly in the img tag
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "0.25rem",
+                          right: "0.25rem",
+                          fontSize: "0.55rem",
+                          color: "#f97316",
+                          background: "rgba(0,0,0,0.6)",
+                          padding: "2px 4px",
+                          borderRadius: "4px",
+                          maxWidth: "90%",
+                          wordBreak: "break-all",
                         }}
                       />
                       <div className="img-overlay" style={s.imageOverlay}>
