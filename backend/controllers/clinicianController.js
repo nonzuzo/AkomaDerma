@@ -3,6 +3,14 @@ import { getIO } from "../config/socket.js";
 import db from "../config/db.js";
 import OpenAI from "openai";
 
+import { v2 as cloudinary } from "cloudinary";
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 // gi Lazy init — only throws when AI is actually called, not on server startup
 // Prevents Railway crash when OPENAI_API_KEY is missing from environment
 const getOpenAI = () => {
@@ -881,8 +889,9 @@ export const submitCase = async (req, res) => {
 export const uploadImagesForCase = async (req, res) => {
   try {
     const caseId = Number(req.params.caseId);
-    if (!Number.isInteger(caseId) || caseId <= 0)
+    if (!Number.isInteger(caseId) || caseId <= 0) {
       return res.status(400).json({ message: "Invalid caseId" });
+    }
 
     if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
       return res.status(400).json({ message: "No images uploaded" });
@@ -897,18 +906,44 @@ export const uploadImagesForCase = async (req, res) => {
        WHERE c.case_id = ? AND cl.user_id = ?`,
       [caseId, userId]
     );
-    if (!rows.length)
+    if (!rows.length) {
       return res.status(403).json({ message: "Not allowed for this case" });
+    }
 
-    // Bulk insert all file paths in a single query
-    const values = req.files.map((f) => [caseId, f.path]);
+    // Upload each file buffer to Cloudinary
+    const uploadPromises = req.files.map((file) => {
+      return new Promise((resolve, reject) => {
+        cloudinary.uploader
+          .upload_stream(
+            {
+              folder: "akomaderma/cases",
+              resource_type: "image",
+            },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result.secure_url);
+            }
+          )
+          .end(file.buffer);
+      });
+    });
+
+    const urls = await Promise.all(uploadPromises);
+
+    // Bulk insert all URLs in a single query
+    const values = urls.map((url) => [caseId, url]);
+
     await db.query("INSERT INTO case_images (case_id, file_path) VALUES ?", [
       values,
     ]);
 
-    res
-      .status(201)
-      .json({ message: "Images uploaded", count: req.files.length });
+    // Optionally update image_count on cases
+    await db.execute("UPDATE cases SET image_count = ? WHERE case_id = ?", [
+      urls.length,
+      caseId,
+    ]);
+
+    res.status(201).json({ message: "Images uploaded", count: urls.length });
   } catch (error) {
     console.error("uploadImagesForCase error:", error);
     res.status(500).json({ message: "Failed to upload images" });
