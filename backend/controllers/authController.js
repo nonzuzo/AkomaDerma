@@ -26,6 +26,7 @@ const generatePasscode = () => {
  * 1. USER SIGNUP
  * POST /api/auth/signup
  */
+console.log("Checking email in DB:", email);
 export const signup = async (req, res) => {
   try {
     let { full_name, email, role, password } = req.body;
