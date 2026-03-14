@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 const API = `${import.meta.env.VITE_API_URL}`;
-const BASE_URL = "import.meta.env.VITE_UPLOADS_URL";
+const BASE_URL = `${import.meta.env.VITE_UPLOADS_URL || ""}`;
 
 const token = () => localStorage.getItem("token") ?? "";
 const auth = () => ({ Authorization: `Bearer ${token()}` });
@@ -189,7 +189,8 @@ export default function CaseWorkspacePage() {
       navigate("/dermatologist/cases", { replace: true });
     }
   }, [caseId, navigate]);
-// get case details
+
+  // get case details
   const load = useCallback(async () => {
     if (!caseId) return;
     setLoading(true);
@@ -264,6 +265,24 @@ export default function CaseWorkspacePage() {
     return raw;
   };
 
+  const imageUrl = (path: string) => {
+    if (!path) return "";
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      // Cloudinary (full URL from DB)
+      return path;
+    }
+
+    const cleaned = path.replace(/\\/g, "/");
+
+    // If backend sends "/uploads/..." style
+    if (cleaned.startsWith("/")) {
+      return `${BASE_URL.replace(/\/$/, "")}${cleaned}`;
+    }
+
+    // If backend sends "uploads/..." or "foo.png"
+    return `${BASE_URL.replace(/\/$/, "")}/${cleaned}`;
+  };
+
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-GH", {
       day: "numeric",
@@ -278,7 +297,8 @@ export default function CaseWorkspacePage() {
   };
 
   const imgUrl = (file_path: string) => `${BASE_URL}/${file_path}`;
-// AI analysis trigger
+
+  // AI analysis trigger
   const runAI = async () => {
     if (!caseId || images.length === 0) return; // confirm case exists and has images before allowing AI run
     setAiRunning(true);
@@ -298,7 +318,8 @@ export default function CaseWorkspacePage() {
       setAiRunning(false);
     }
   };
-// Diagnosis submission
+
+  // Diagnosis submission
   const submitDiagnosis = async () => {
     if (!diagSelected) {
       setDiagError("Please select a diagnosis.");
@@ -1295,8 +1316,9 @@ export default function CaseWorkspacePage() {
                             lineHeight: 1.5,
                           }}
                         >
-                          {images.length} image{images.length !== 1 ? "s" : ""}{" "}
-                          ready. Click below to run the model.
+                          {images.length} image
+                          {images.length !== 1 ? "s" : ""} ready. Click below to
+                          run the model.
                         </p>
                       </div>
                       {aiRunError && (
@@ -1420,7 +1442,6 @@ export default function CaseWorkspacePage() {
                     </span>
                     {diagnosis && <span style={s.savedTag}>Saved</span>}
                   </div>
-
                   <div style={s.formBody}>
                     {/* 1. Diagnosis option buttons */}
                     <div style={s.fieldGroup}>
@@ -1836,7 +1857,6 @@ export default function CaseWorkspacePage() {
                     {(() => {
                       const medsText =
                         typeof txMedications === "string" ? txMedications : "";
-
                       return (
                         <>
                           <button
@@ -2290,7 +2310,12 @@ const s: Record<string, React.CSSProperties> = {
     borderBottomStyle: "solid",
     borderBottomColor: "#f1f5f9",
   },
-  medName: { fontSize: "0.825rem", fontWeight: 600, color: "#1e293b", flex: 1 },
+  medName: {
+    fontSize: "0.825rem",
+    fontWeight: 600,
+    color: "#1e293b",
+    flex: 1,
+  },
   medDose: { fontSize: "0.775rem", color: "#7c3aed", fontWeight: 500 },
   medDate: { fontSize: "0.7rem", color: "#94a3b8" },
   conditionItem: {
