@@ -1,4 +1,3 @@
-# ml_server/main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import torch
@@ -17,17 +16,40 @@ app = FastAPI()
 # ── Config from env ────────────────────────────────────────────────────────────
 TEMPERATURE = float(os.getenv("SOFTMAX_TEMPERATURE", "4.0"))
 
-# Path to the model file; easy to swap by changing env var in Railway
 MODEL_PATH = os.getenv("MODEL_PATH", "/data/model.pt")
+MODEL_URL = os.getenv("MODEL_URL")  # URL we’ll set in Railway for filebrowser
 print(f"Loading model from {MODEL_PATH}")
 
 # ── Class names — exact order from your training code ─────────────────────────
-# class_names = ['acne', 'tinea', 'lichen', 'eczema']
 CLASS_NAMES = ["acne", "tinea", "lichen", "eczema"]
+
+
+def ensure_model_file():
+    if os.path.exists(MODEL_PATH):
+        print("Model file already present, skipping download.")
+        return
+
+    if not MODEL_URL:
+        raise RuntimeError("MODEL_URL is not set and model file is missing.")
+
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    print(f"Downloading model from {MODEL_URL} to {MODEL_PATH} ...")
+
+    resp = requests.get(MODEL_URL, stream=True, timeout=60)
+    resp.raise_for_status()
+
+    with open(MODEL_PATH, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+
+    print("Model download complete.")
+
 
 # ── Load model at startup ─────────────────────────────────────────────────────
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+ensure_model_file()
 checkpoint = torch.load(MODEL_PATH, map_location=device)
 
 backbone = checkpoint["backbone"]       # e.g. "efficientnet_b3"
@@ -39,12 +61,8 @@ model.to(device)
 model.eval()
 
 # ── Normalization — dataset stats (can override via env) ──────────────────────
-MEAN = list(
-  map(float, os.getenv("NORM_MEAN", "0.612,0.487,0.423").split(","))
-)
-STD = list(
-  map(float, os.getenv("NORM_STD", "0.598,0.513,0.431").split(","))
-)
+MEAN = list(map(float, os.getenv("NORM_MEAN", "0.612,0.487,0.423").split(",")))
+STD = list(map(float, os.getenv("NORM_STD", "0.598,0.513,0.431").split(",")))
 
 # ── Transforms — match your validation pipeline ───────────────────────────────
 transform = A.Compose(
@@ -56,28 +74,24 @@ transform = A.Compose(
     ]
 )
 
-# ── Request schema ─────────────────────────────────────────────────────────────
 class PredictRequest(BaseModel):
     image_url: str
 
-
-# ── POST /predict ──────────────────────────────────────────────────────────────
 @app.post("/predict")
 async def predict(req: PredictRequest):
     try:
-        # Download image from URL (e.g. Cloudinary)
         response = requests.get(req.image_url, timeout=10)
         response.raise_for_status()
 
         img = Image.open(BytesIO(response.content)).convert("RGB")
         arr = np.array(img)
         aug = transform(image=arr)
-        tensor = aug["image"].unsqueeze(0).to(device)  # [1, 3, 224, 224]
+        tensor = aug["image"].unsqueeze(0).to(device)
 
         with torch.no_grad():
-            logits = model(tensor)             # [1, num_classes]
+            logits = model(tensor)
             logits = logits / TEMPERATURE
-            probs = F.softmax(logits, dim=1)[0]  # [num_classes]
+            probs = F.softmax(logits, dim=1)[0]
 
         confidence, pred_idx = torch.max(probs, dim=0)
 
@@ -90,12 +104,9 @@ async def predict(req: PredictRequest):
             },
             "model_name": model_name,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ── GET /health ────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {
