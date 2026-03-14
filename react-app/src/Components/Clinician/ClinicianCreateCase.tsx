@@ -92,8 +92,6 @@ export default function ClinicianCreateCase() {
   const prevStep = () => setStep((s) => s - 1);
 
   // ── On mount — read URL params ───────────────────────────────────────────
-  // patient_id and appointment_id may be pre-filled when navigating from
-  // the Patient Profile or Appointments pages
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const patientId = urlParams.get("patient_id");
@@ -163,15 +161,10 @@ export default function ClinicianCreateCase() {
   };
 
   // ── Case submission ──────────────────────────────────────────────────────
-  // Step A: POST /clinicians/cases/submit        → creates case, returns case_id
-  // Step B: POST /clinicians/cases/:id/images    → uploads images to case_images
-  //
-  // Images are sent in a separate multipart request AFTER the case is created
-  // because the case_id is required to link images in the case_images table.
   const handleSubmitCase = async () => {
     console.log("🚀 handleSubmitCase called");
     console.log("Patient PID:", formData.patientPid);
-    console.log("Images count:", images.length);
+    console.log("Images count at submit:", images.length);
     console.log("Chief complaint:", formData.chiefComplaint);
 
     // Client-side validation
@@ -183,16 +176,17 @@ export default function ClinicianCreateCase() {
       setSubmitError("Chief complaint is required");
       return;
     }
-    if (images.length === 0) {
-      setSubmitError("At least one image is required");
-      return;
-    }
+    // TEMP: relax image requirement so we can debug uploads without blocking
+    // if (images.length === 0) {
+    //   setSubmitError("At least one image is required");
+    //   return;
+    // }
 
     setSubmitting(true);
     setSubmitError("");
 
     try {
-      // ── Step A: Create the case (JSON body only, no files here) ──────────
+      // ── Step A: Create the case ─────────────────────────────────────────
       console.log("📤 Submitting case to backend...");
       const caseRes = await fetch(`${API}/clinicians/cases/submit`, {
         method: "POST",
@@ -202,7 +196,6 @@ export default function ClinicianCreateCase() {
         },
         body: JSON.stringify({
           patient_id: parseInt(formData.patientPid),
-          // IMPORTANT: send vitals as an object; backend will JSON.stringify
           vitals: formData.vitals,
           chief_complaint: formData.chiefComplaint,
           lesion_duration: formData.lesionDuration,
@@ -225,28 +218,29 @@ export default function ClinicianCreateCase() {
       console.log("✅ Case created with ID:", caseId);
 
       // ── Step B: Upload images (multipart/form-data) ──────────────────────
-      // Do NOT set Content-Type manually — browser sets it automatically
-      // with the correct multipart boundary when body is FormData
-      console.log("⬆️ Uploading images for case:", caseId);
-      const imageFormData = new FormData();
+      if (images.length > 0) {
+        console.log("⬆️ Uploading images for case:", caseId);
+        const imageFormData = new FormData();
+        images.slice(0, 5).forEach((img) => {
+          imageFormData.append("images", img);
+        });
 
-      // Enforce the same max-5 rule on the client as multer does on the server
-      images.slice(0, 5).forEach((img) => {
-        imageFormData.append("images", img); // field name must match .array("images", 5)
-      });
+        const imgRes = await fetch(`${API}/clinicians/cases/${caseId}/images`, {
+          method: "POST",
+          headers: auth(), // DO NOT set Content-Type here
+          body: imageFormData,
+        });
 
-      const imgRes = await fetch(`${API}/clinicians/cases/${caseId}/images`, {
-        method: "POST",
-        headers: auth(), // auth only, NO Content-Type header
-        body: imageFormData,
-      });
+        if (!imgRes.ok) {
+          const err = await imgRes.json().catch(() => ({}));
+          throw new Error(err.message || "Failed to upload images");
+        }
 
-      if (!imgRes.ok) {
-        const err = await imgRes.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to upload images");
+        console.log("✅ Images uploaded successfully");
+      } else {
+        console.log("ℹ️ No images to upload for this case.");
       }
 
-      console.log("✅ Images uploaded successfully");
       alert("Case submitted successfully to dermatologist!");
       navigate("/clinician/dashboard");
     } catch (error) {
@@ -310,10 +304,7 @@ export default function ClinicianCreateCase() {
         )}
       </div>
 
-      {/* ── Navigation bar ──────────────────────────────────────────────────
-          Handles Previous and Next for steps 1–4 only.
-          Step 5 has its own dedicated Submit button inside the Step5 component.
-          This eliminates all step-counting logic from the submit action. */}
+      {/* Navigation bar */}
       <div style={navigation}>
         {step > 1 && (
           <button
@@ -325,7 +316,6 @@ export default function ClinicianCreateCase() {
           </button>
         )}
         <div style={stepCounter}>Step {step} of 5</div>
-        {/* Only show Next button on steps 1–4 */}
         {step < 5 && (
           <button
             style={navButton("primary")}
@@ -516,7 +506,6 @@ function Step3({
 }
 
 // ─── Step 4: Image Upload ─────────────────────────────────────────────────────
-// Files are stored in state here and uploaded in handleSubmitCase Step B.
 function Step4({
   images,
   setImages,
@@ -524,12 +513,12 @@ function Step4({
   images: File[];
   setImages: React.Dispatch<React.SetStateAction<File[]>>;
 }) {
-  // Drop handler with max-5 enforcement to match multer limits
+  // Drop handler with max-5 enforcement
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setImages((prev) => {
       const combined = [...prev, ...Array.from(e.dataTransfer.files)];
-      // Hard cap at 5 images — prevents multer "Too many files" error on backend
+      console.log("Drop added files, new images state:", combined);
       return combined.slice(0, 5);
     });
   };
@@ -537,8 +526,11 @@ function Step4({
   // File chooser handler with max-5 enforcement
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
+      const files = Array.from(e.target.files);
+      console.log("Selected files:", files);
       setImages((prev) => {
-        const combined = [...prev, ...Array.from(e.target.files!)];
+        const combined = [...prev, ...files];
+        console.log("Images state will be:", combined);
         return combined.slice(0, 5);
       });
       // Reset input so selecting the same file again will trigger onChange
@@ -609,7 +601,6 @@ function Step4({
                     src={url}
                     style={previewImage}
                     alt={`Preview ${idx + 1}`}
-                    // Revoke object URL after load to avoid memory leaks
                     onLoad={() => URL.revokeObjectURL(url)}
                   />
                   <button
@@ -630,9 +621,6 @@ function Step4({
 }
 
 // ─── Step 5: Review & Submit ──────────────────────────────────────────────────
-// Read-only summary of all entered data.
-// ✅ Has its own Submit button — does NOT rely on the navigation bar.
-// This is the fix for the button never calling handleSubmitCase.
 function Step5({
   formData,
   images,
@@ -648,6 +636,8 @@ function Step5({
   onSubmit: () => void;
   appointmentId: number | null;
 }) {
+  console.log("Step5 images length:", images.length);
+
   return (
     <div style={stepCard}>
       <h2 style={stepTitle}>Review & Submit</h2>
@@ -702,7 +692,6 @@ function Step5({
         </span>
       </div>
 
-      {/* Inline error shown above the submit button */}
       {submitError && <div style={errorMessage}>{submitError}</div>}
 
       {submitting && (
@@ -711,7 +700,6 @@ function Step5({
         </p>
       )}
 
-      {/* ✅ Dedicated submit button — direct onClick, no step logic */}
       <button
         style={{
           width: "100%",
