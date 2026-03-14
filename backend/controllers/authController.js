@@ -26,7 +26,7 @@ const generatePasscode = () => {
  * 1. USER SIGNUP
  * POST /api/auth/signup
  */
-console.log("Checking email in DB:", email);
+
 export const signup = async (req, res) => {
   try {
     let { full_name, email, role, password } = req.body;
@@ -36,9 +36,14 @@ export const signup = async (req, res) => {
     full_name = (full_name || "").trim();
     email = (email || "").toLowerCase().trim();
     role = (role || "").toLowerCase().trim();
+    
+// debug
+    console.log("Checking email in DB:", email);
+
 
     // Required fields
     if (!full_name || !email || !role || !password) {
+      
       return res.status(400).json({
         error: "Missing required fields: full_name, email, role, password",
       });
