@@ -296,8 +296,6 @@ export default function CaseWorkspacePage() {
     return "#ef4444";
   };
 
-  const imgUrl = (file_path: string) => `${BASE_URL}/${file_path}`;
-
   // AI analysis trigger
   const runAI = async () => {
     if (!caseId || images.length === 0) return; // confirm case exists and has images before allowing AI run
@@ -957,7 +955,7 @@ export default function CaseWorkspacePage() {
                           }}
                         >
                           <img
-                            src={imgUrl(img.file_path)}
+                            src={imageUrl(img.file_path)}
                             alt={`Lesion ${idx + 1}`}
                             style={s.thumbImg}
                             onError={(e) => {
@@ -1228,7 +1226,7 @@ export default function CaseWorkspacePage() {
                           onClick={() => setLightbox(idx)}
                         >
                           <img
-                            src={imgUrl(img.file_path)}
+                            src={imageUrl(img.file_path)}
                             alt={`Lesion ${idx + 1}`}
                             style={s.thumbImg}
                             onError={(e) => {
@@ -1931,7 +1929,7 @@ export default function CaseWorkspacePage() {
               ‹
             </button>
             <img
-              src={imgUrl(images[lightbox].file_path)}
+              src={imageUrl(images[lightbox].file_path)}
               alt="Lesion"
               style={s.lbImg}
               onError={(e) => {

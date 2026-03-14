@@ -162,7 +162,7 @@ export default function ClinicianCreateCase() {
 
   // ── Case submission ──────────────────────────────────────────────────────
   const handleSubmitCase = async () => {
-    console.log("🚀 handleSubmitCase called");
+    console.log("handleSubmitCase called");
     console.log("Patient PID:", formData.patientPid);
     console.log("Images count at submit:", images.length);
     console.log("Chief complaint:", formData.chiefComplaint);
@@ -187,7 +187,7 @@ export default function ClinicianCreateCase() {
 
     try {
       // ── Step A: Create the case ─────────────────────────────────────────
-      console.log("📤 Submitting case to backend...");
+      console.log("Submitting case to backend...");
       const caseRes = await fetch(`${API}/clinicians/cases/submit`, {
         method: "POST",
         headers: {
@@ -203,7 +203,7 @@ export default function ClinicianCreateCase() {
           symptoms: formData.symptoms,
           prior_treatment: formData.priorTreatment,
           lesion_type: formData.lesionType,
-          image_count: images.length,
+          image_count: 0,
           parent_case_id: formData.parentCaseId,
         }),
       });
@@ -215,11 +215,11 @@ export default function ClinicianCreateCase() {
 
       const caseData = await caseRes.json();
       const caseId = caseData.case_id;
-      console.log("✅ Case created with ID:", caseId);
+      console.log("Case created with ID:", caseId);
 
       // ── Step B: Upload images (multipart/form-data) ──────────────────────
       if (images.length > 0) {
-        console.log("⬆️ Uploading images for case:", caseId);
+        console.log(" Uploading images for case:", caseId);
         const imageFormData = new FormData();
         images.slice(0, 5).forEach((img) => {
           imageFormData.append("images", img);
@@ -236,9 +236,9 @@ export default function ClinicianCreateCase() {
           throw new Error(err.message || "Failed to upload images");
         }
 
-        console.log("✅ Images uploaded successfully");
+        console.log("Images uploaded successfully");
       } else {
-        console.log("ℹ️ No images to upload for this case.");
+        console.log("No images to upload for this case.");
       }
 
       alert("Case submitted successfully to dermatologist!");
