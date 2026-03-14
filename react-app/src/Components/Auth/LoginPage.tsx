@@ -14,21 +14,28 @@ export default function LoginPage() {
     rememberMe: false,
   });
 
-  const [errors,    setErrors]    = useState({});
+  const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const [showPass,  setShowPass]  = useState(false); // ← ADD show/hide password
+  const [showPass, setShowPass] = useState(false); // ← ADD show/hide password
 
   const navigate = useNavigate();
-
+  // On first render, restore remembered email if rememberMe was set before
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    const remember  = localStorage.getItem("rememberMe");
+    const savedUser = localStorage.getItem("user"); // existing storage
+    const remember = localStorage.getItem("rememberMe"); // "true" or null
+
     if (savedUser && remember === "true") {
       try {
-        const user = JSON.parse(savedUser);
-        setFormData({ email: user.email || "", password: "", rememberMe: true });
+        const user = JSON.parse(savedUser); // parse stored loginData
+        setFormData({
+          email: user.user?.email || "", // prefill only email
+          password: "",
+          rememberMe: true,
+        });
       } catch (e) {
+        // If parsing fails, clear corrupted data
         localStorage.removeItem("user");
+        localStorage.removeItem("rememberMe");
       }
     }
   }, []);
@@ -55,32 +62,44 @@ export default function LoginPage() {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Handle login submit: call backend, store token, navigate by role
   const handleSubmit = async () => {
+    // Stop if validation fails
     if (!validateForm()) return;
     setIsLoading(true);
-    try {
-      const loginResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/login`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          email:    formData.email.trim(),
-          password: formData.password,
-        }),
-      });
 
+    try {
+      // Call backend /auth/login with email + password
+      const loginResponse = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: formData.email.trim(),
+            password: formData.password,
+          }),
+        }
+      );
+
+      // Parse JSON response
       const loginData = await loginResponse.json();
 
       if (loginResponse.ok) {
+        // Store token and user in localStorage (same as before)
         localStorage.setItem("token", loginData.token);
-        localStorage.setItem("user",  JSON.stringify(loginData));
+        localStorage.setItem("user", JSON.stringify(loginData));
 
+        // Remember-me controls only whether we remember this login for next time
         if (formData.rememberMe) {
+          // Mark that we should prefill email on next visit
           localStorage.setItem("rememberMe", "true");
         } else {
-          sessionStorage.setItem("user", JSON.stringify(loginData));
+          // Clear rememberMe flag if user unchecked it
           localStorage.removeItem("rememberMe");
         }
 
+        // Role-based navigation (unchanged)
         if (loginData.user?.role === "admin") {
           alert("Welcome, Admin!");
           navigate("/admin", { replace: true });
@@ -92,90 +111,182 @@ export default function LoginPage() {
           navigate("/dermatologist/dashboard", { replace: true });
         }
       } else {
-        const statusResponse = await fetch(`${import.meta.env.VITE_API_URL}/auth/status`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ email: formData.email.trim() }),
-        });
+        // If login fails, check auth status for more context
+        const statusResponse = await fetch(
+          `${import.meta.env.VITE_API_URL}/auth/status`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: formData.email.trim() }),
+          }
+        );
 
         const statusData = await statusResponse.json();
 
         if (statusData.status === "pending_approval") {
+          // User exists but admin hasn't approved yet
           alert(statusData.message);
         } else if (statusData.status === "needs_passcode") {
+          // User approved but still needs to verify passcode → redirect
           alert(statusData.message);
           navigate("/verify-passcode", {
-            state:   { email: formData.email.trim() },
+            state: { email: formData.email.trim() },
             replace: true,
           });
         } else {
-          let errorMessage = loginData.error || loginData.message || "Login failed";
-          if (errorMessage.includes("credentials") || errorMessage.includes("password")) {
+          // Generic login error handling
+          let errorMessage =
+            loginData.error || loginData.message || "Login failed";
+          if (
+            errorMessage.includes("credentials") ||
+            errorMessage.includes("password")
+          ) {
             errorMessage = "Invalid email or password";
           }
           alert(`Login Error: ${errorMessage}`);
         }
       }
     } catch (error) {
+      // Network or server connectivity issues
       console.error("Network error during login:", error);
-      alert("Cannot connect to server. Please check your connection and try again.");
+      alert(
+        "Cannot connect to server. Please check your connection and try again."
+      );
     } finally {
+      // Always end loading state
       setIsLoading(false);
     }
   };
 
   const styles = {
     container: {
-      minHeight: "100vh", display: "flex", backgroundColor: "#f0f4f8",
+      minHeight: "100vh",
+      display: "flex",
+      backgroundColor: "#f0f4f8",
     },
     leftPanel: {
       flex: "0 0 40%",
       background: "linear-gradient(135deg, #3db5e6 0%, #2a8fb5 100%)",
-      display: "flex", flexDirection: "column", justifyContent: "center",
-      alignItems: "center", padding: "3rem", color: "white",
-      position: "relative", overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: "3rem",
+      color: "white",
+      position: "relative",
+      overflow: "hidden",
     },
     rightPanel: {
-      flex: "1", display: "flex", justifyContent: "center",
-      alignItems: "center", padding: "2rem", backgroundColor: "#ffffff",
+      flex: "1",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      padding: "2rem",
+      backgroundColor: "#ffffff",
     },
     formContainer: { width: "100%", maxWidth: "450px", padding: "2rem" },
-    logo:          { fontSize: "2.5rem", fontWeight: "bold", marginBottom: "1rem", textAlign: "center" },
-    title:         { fontSize: "2rem", fontWeight: "bold", marginBottom: "0.5rem", color: "#1a202c" },
-    subtitle:      { color: "#718096", marginBottom: "2.5rem", fontSize: "0.95rem" },
-    inputGroup:    { marginBottom: "1.5rem" },
-    label:         { display: "block", marginBottom: "0.5rem", color: "#2d3748", fontWeight: "500" },
+    logo: {
+      fontSize: "2.5rem",
+      fontWeight: "bold",
+      marginBottom: "1rem",
+      textAlign: "center",
+    },
+    title: {
+      fontSize: "2rem",
+      fontWeight: "bold",
+      marginBottom: "0.5rem",
+      color: "#1a202c",
+    },
+    subtitle: { color: "#718096", marginBottom: "2.5rem", fontSize: "0.95rem" },
+    inputGroup: { marginBottom: "1.5rem" },
+    label: {
+      display: "block",
+      marginBottom: "0.5rem",
+      color: "#2d3748",
+      fontWeight: "500",
+    },
     input: {
-      width: "100%", padding: "0.75rem 1rem", border: "1px solid #e2e8f0",
-      borderRadius: "8px", fontSize: "1rem", transition: "border-color 0.2s",
+      width: "100%",
+      padding: "0.75rem 1rem",
+      border: "1px solid #e2e8f0",
+      borderRadius: "8px",
+      fontSize: "1rem",
+      transition: "border-color 0.2s",
       boxSizing: "border-box",
     },
     inputDisabled: { backgroundColor: "#f7fafc", cursor: "not-allowed" },
-    error:         { color: "#e53e3e", fontSize: "0.875rem", marginTop: "0.25rem" },
+    error: { color: "#e53e3e", fontSize: "0.875rem", marginTop: "0.25rem" },
     button: {
-      width: "100%", padding: "1rem", backgroundColor: "#3db5e6",
-      color: "white", border: "none", borderRadius: "50px", fontSize: "1.1rem",
-      fontWeight: "600", cursor: "pointer", marginTop: "1.5rem", transition: "background-color 0.2s",
+      width: "100%",
+      padding: "1rem",
+      backgroundColor: "#3db5e6",
+      color: "white",
+      border: "none",
+      borderRadius: "50px",
+      fontSize: "1.1rem",
+      fontWeight: "600",
+      cursor: "pointer",
+      marginTop: "1.5rem",
+      transition: "background-color 0.2s",
     },
-    buttonDisabled:  { backgroundColor: "#a0aec0", cursor: "not-allowed" },
-    rememberForgot:  { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1rem" },
-    checkboxContainer:{ display: "flex", alignItems: "center" },
-    checkbox:        { marginRight: "0.5rem", width: "18px", height: "18px", cursor: "pointer" },
-    checkboxLabel:   { fontSize: "0.9rem", color: "#4a5568" },
-    footer:          { textAlign: "center", marginTop: "2rem", color: "#718096", fontStyle: "italic" },
-    leftContent:     { textAlign: "center", zIndex: 1 },
-    leftTitle:       { fontSize: "2rem", fontWeight: "bold", marginBottom: "1rem", lineHeight: "1.3" },
-    leftSubtitle:    { fontSize: "1.1rem", opacity: 0.9, lineHeight: "1.6" },
-    decorativeCircle:{ position: "absolute", borderRadius: "50%", background: "rgba(255,255,255,0.1)" },
+    buttonDisabled: { backgroundColor: "#a0aec0", cursor: "not-allowed" },
+    rememberForgot: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: "1rem",
+    },
+    checkboxContainer: { display: "flex", alignItems: "center" },
+    checkbox: {
+      marginRight: "0.5rem",
+      width: "18px",
+      height: "18px",
+      cursor: "pointer",
+    },
+    checkboxLabel: { fontSize: "0.9rem", color: "#4a5568" },
+    footer: {
+      textAlign: "center",
+      marginTop: "2rem",
+      color: "#718096",
+      fontStyle: "italic",
+    },
+    leftContent: { textAlign: "center", zIndex: 1 },
+    leftTitle: {
+      fontSize: "2rem",
+      fontWeight: "bold",
+      marginBottom: "1rem",
+      lineHeight: "1.3",
+    },
+    leftSubtitle: { fontSize: "1.1rem", opacity: 0.9, lineHeight: "1.6" },
+    decorativeCircle: {
+      position: "absolute",
+      borderRadius: "50%",
+      background: "rgba(255,255,255,0.1)",
+    },
   };
 
   return (
     <div style={styles.container}>
-
       {/* ── Left decorative panel ─────────────────────────────────────── */}
       <div style={styles.leftPanel}>
-        <div style={{ ...styles.decorativeCircle, width: "300px", height: "300px", top: "-100px", left: "-100px" }} />
-        <div style={{ ...styles.decorativeCircle, width: "200px", height: "200px", bottom: "-50px", right: "-50px" }} />
+        <div
+          style={{
+            ...styles.decorativeCircle,
+            width: "300px",
+            height: "300px",
+            top: "-100px",
+            left: "-100px",
+          }}
+        />
+        <div
+          style={{
+            ...styles.decorativeCircle,
+            width: "200px",
+            height: "200px",
+            bottom: "-50px",
+            right: "-50px",
+          }}
+        />
         <div style={styles.leftContent}>
           <div style={styles.logo}>
             <span style={{ color: "#fff" }}>Akoma</span>
@@ -183,8 +294,10 @@ export default function LoginPage() {
           </div>
           <h2 style={styles.leftTitle}>Welcome Back!</h2>
           <p style={styles.leftSubtitle}>
-            Access your secure clinic portal,<br />
-            review patient case history,<br />
+            Access your secure clinic portal,
+            <br />
+            review patient case history,
+            <br />
             and manage teledermatology consultations with ease.
           </p>
         </div>
@@ -194,7 +307,9 @@ export default function LoginPage() {
       <div style={styles.rightPanel}>
         <div style={styles.formContainer}>
           <h1 style={styles.title}>Log In</h1>
-          <p style={styles.subtitle}>Enter your credentials to access your account</p>
+          <p style={styles.subtitle}>
+            Enter your credentials to access your account
+          </p>
 
           <div>
             {/* Email */}
@@ -205,7 +320,10 @@ export default function LoginPage() {
                 name="email"
                 value={formData.email}
                 onChange={handleChange}
-                style={{ ...styles.input, ...(isLoading && styles.inputDisabled) }}
+                style={{
+                  ...styles.input,
+                  ...(isLoading && styles.inputDisabled),
+                }}
                 placeholder="your.email@example.com"
                 disabled={isLoading}
               />
@@ -224,7 +342,7 @@ export default function LoginPage() {
                   style={{
                     ...styles.input,
                     ...(isLoading && styles.inputDisabled),
-                    paddingRight: "4rem",  // space for show/hide button
+                    paddingRight: "4rem", // space for show/hide button
                   }}
                   placeholder="Enter your password"
                   disabled={isLoading}
@@ -234,16 +352,24 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setShowPass(!showPass)}
                   style={{
-                    position: "absolute", right: "0.75rem", top: "50%",
-                    transform: "translateY(-50%)", background: "none",
-                    border: "none", cursor: "pointer", color: "#9ca3af",
-                    fontSize: "0.8rem", fontWeight: 600,
+                    position: "absolute",
+                    right: "0.75rem",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#9ca3af",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
                   }}
                 >
                   {showPass ? "Hide" : "Show"}
                 </button>
               </div>
-              {errors.password && <div style={styles.error}>{errors.password}</div>}
+              {errors.password && (
+                <div style={styles.error}>{errors.password}</div>
+              )}
             </div>
 
             {/* Remember me + Forgot password */}
@@ -266,7 +392,12 @@ export default function LoginPage() {
               {/* ← CHANGED: was <a href="#forgot"> — now a real React Router Link */}
               <Link
                 to="/forgot-password"
-                style={{ color: "#3db5e6", textDecoration: "none", fontWeight: "500", fontSize: "0.9rem" }}
+                style={{
+                  color: "#3db5e6",
+                  textDecoration: "none",
+                  fontWeight: "500",
+                  fontSize: "0.9rem",
+                }}
               >
                 Forgot Password?
               </Link>
@@ -276,9 +407,16 @@ export default function LoginPage() {
             <button
               onClick={handleSubmit}
               disabled={isLoading}
-              style={{ ...styles.button, ...(isLoading && styles.buttonDisabled) }}
-              onMouseOver={(e) => { if (!isLoading) e.target.style.backgroundColor = "#2a8fb5"; }}
-              onMouseOut={(e)  => { if (!isLoading) e.target.style.backgroundColor = "#3db5e6"; }}
+              style={{
+                ...styles.button,
+                ...(isLoading && styles.buttonDisabled),
+              }}
+              onMouseOver={(e) => {
+                if (!isLoading) e.target.style.backgroundColor = "#2a8fb5";
+              }}
+              onMouseOut={(e) => {
+                if (!isLoading) e.target.style.backgroundColor = "#3db5e6";
+              }}
             >
               {isLoading ? "Signing In..." : "Log In"}
             </button>
@@ -286,7 +424,15 @@ export default function LoginPage() {
             {/* Footer */}
             <div style={styles.footer}>
               Don't have an account?{" "}
-              <a href="/signup" style={{ color: "#3db5e6", textDecoration: "none", fontWeight: "500", fontSize: "0.9rem" }}>
+              <a
+                href="/signup"
+                style={{
+                  color: "#3db5e6",
+                  textDecoration: "none",
+                  fontWeight: "500",
+                  fontSize: "0.9rem",
+                }}
+              >
                 Sign Up
               </a>
             </div>
