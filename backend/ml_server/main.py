@@ -18,7 +18,7 @@ app = FastAPI()
 TEMPERATURE = float(os.getenv("SOFTMAX_TEMPERATURE", "4.0"))
 
 # Path to the model file; easy to swap by changing env var in Railway
-MODEL_PATH = os.getenv("MODEL_PATH", "./model.pt")
+MODEL_PATH = os.getenv("MODEL_PATH", "/data/model.pt")
 print(f"Loading model from {MODEL_PATH}")
 
 # ── Class names — exact order from your training code ─────────────────────────
