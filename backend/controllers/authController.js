@@ -279,10 +279,22 @@ export const approveUser = async (req, res) => {
         </div>
       `,
     });
+    // Did this becasue of railway + resend not working together, but should be fine to leave in as a safety check and sending to only one email
+    // if (emailError) {
+    //   console.error(" Resend error:", emailError);
+    //   return res.status(500).json({ error: emailError.message });
+    // }
 
     if (emailError) {
       console.error(" Resend error:", emailError);
-      return res.status(500).json({ error: emailError.message });
+      // Don't block approval just because email failed
+      return res.json({
+        success: true,
+        message:
+          "User approved, but the verification email could not be sent. " +
+          "Please share the passcode manually: " +
+          passcode,
+      });
     }
 
     console.log(" Email sent successfully to", user[0].email);
