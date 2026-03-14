@@ -50,7 +50,7 @@ def ensure_model_file():
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ensure_model_file()
-checkpoint = torch.load(MODEL_PATH, map_location=device)
+checkpoint = torch.load(MODEL_PATH, map_location=device,weights_only=False)
 
 backbone = checkpoint["backbone"]       # e.g. "efficientnet_b3"
 model_name = checkpoint["model_name"]   # e.g. "efficientnet_b3"
