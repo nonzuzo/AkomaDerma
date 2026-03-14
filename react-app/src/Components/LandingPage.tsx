@@ -1,10 +1,11 @@
 import React from "react";
 import heroImage from "../assets/hero-image.png";
+import aboutImage from "../assets/image_2.jpg";
 import { useNavigate } from "react-router-dom"; // THIS LINE
 
 // Main landing page component
 export default function LandingPage() {
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
   // Centralized inline styles object
   const styles = {
     // Top navigation bar styling
@@ -203,13 +204,11 @@ export default function LandingPage() {
                 }}
                 //const navigate = useNavigate();
               >
-               
                 <span style={{ fontWeight: "600" }}>AkomaDerma</span> is a
                 secure AI teledermatology platform connecting Ghanaian{" "}
                 <span style={{ color: "#3db5e6" }}>dermatologists</span> for
                 fast and accurate skin health management.
               </p>
-              
 
               {/* Primary CTA button with hover effects */}
               <button
@@ -369,17 +368,17 @@ export default function LandingPage() {
         <div style={styles.container}>
           <div style={styles.row}>
             <div style={styles.col6}>
-              <div
+              <img
+                src={aboutImage}
+                alt="Clinics connected to dermatologists across Ghana"
                 style={{
-                  ...heroImageStyle,
+                  ...styles.imgFluid,
                   height: "400px",
+                  width: "100%",
+                  objectFit: "cover",
                   marginRight: "2rem",
                 }}
-              >
-                <span style={{ color: "#6c757d", fontSize: "1.2rem" }}>
-                  About Image
-                </span>
-              </div>
+              />
             </div>
             <div style={styles.col6}>
               <h2
@@ -584,25 +583,24 @@ export default function LandingPage() {
       <footer style={{ backgroundColor: "white", padding: "3rem 0" }}>
         <div style={styles.container}>
           <div style={styles.row}>
+            {/* Brand / summary column (replaces Logo here) */}
             <div style={{ ...styles.col4, marginBottom: "2rem" }}>
-              <div
+              <h3 style={{ fontWeight: "bold", marginBottom: "0.75rem" }}>
+                <span style={{ color: "#3db5e6" }}>Akoma</span>
+                <span style={{ color: "#000" }}>Derma</span>
+              </h3>
+              <p
                 style={{
-                  border: "1px solid #ddd",
-                  borderRadius: "4px",
-                  padding: "2rem",
-                  textAlign: "center",
-                  minHeight: "150px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  color: "#6c757d",
+                  lineHeight: 1.6,
+                  maxWidth: "260px",
+                  margin: 0,
                 }}
               >
-                <h4
-                  style={{ color: "#6c757d", fontStyle: "italic", margin: 0 }}
-                >
-                  Logo here
-                </h4>
-              </div>
+                Secure AI‑assisted teledermatology connecting Ghanaian clinics
+                with certified dermatologists for faster, more accurate skin
+                care.
+              </p>
             </div>
 
             <div style={{ ...styles.col4, marginBottom: "2rem" }}>
