@@ -1,10 +1,12 @@
 # ml_server/requirements.txt
 fastapi
-uvicorn
+uvicorn[standard]
 torch
 torchvision
 timm
 albumentations
+albumentations[pytorch]
 pillow
 requests
 python-dotenv
+numpy
