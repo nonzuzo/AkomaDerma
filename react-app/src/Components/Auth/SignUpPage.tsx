@@ -40,9 +40,18 @@ export default function SignUpPage() {
       newErrors.email = "Email is invalid";
 
     // Password validation
-    if (!formData.password) newErrors.password = "Password is required";
-    else if (formData.password.length < 8)
+    if (!formData.password) {
+      newErrors.password = "Password is required";
+    } else if (formData.password.length < 8) {
       newErrors.password = "Password must be at least 8 characters";
+    } else if (
+      !/[A-Z]/.test(formData.password) ||
+      !/[a-z]/.test(formData.password) ||
+      !/[0-9]/.test(formData.password)
+    ) {
+      newErrors.password =
+        "Password must include uppercase, lowercase, and a number";
+    }
 
     // Confirm password validation
     if (formData.password !== formData.confirmPassword)
@@ -74,13 +83,16 @@ export default function SignUpPage() {
 
       try {
         // Send POST request to backend signup API
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/signup`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json", // send JSON
-          },
-          body: JSON.stringify(submissionPayload), // convert JS object to JSON string
-        });
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/auth/signup`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json", // send JSON
+            },
+            body: JSON.stringify(submissionPayload), // convert JS object to JSON string
+          }
+        );
         console.log("Response status:", response.status);
 
         // Parse response from backend
