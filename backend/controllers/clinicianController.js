@@ -861,7 +861,7 @@ export const submitCase = async (req, res) => {
         lesion_type || null,
         // store vitals as proper JSON or NULL
         vitals ? JSON.stringify(vitals) : null,
-        image_count || 0,
+        0,
         parent_case_id || null,
       ]
     );
@@ -951,6 +951,11 @@ export const uploadImagesForCase = async (req, res) => {
       values,
     ]);
 
+    const [[{ cnt }]] = await db.execute(
+      "SELECT COUNT(*) AS cnt FROM case_images WHERE case_id = ?",
+      [caseId]
+    );
+
     // Update image_count and image_path on cases table:
     // - image_count is incremented
     // - image_path is set to first image if currently NULL (primary thumbnail)
@@ -959,7 +964,7 @@ export const uploadImagesForCase = async (req, res) => {
        SET image_count = image_count + ?,
            image_path  = COALESCE(image_path, ?)
        WHERE case_id = ?`,
-      [urls.length, urls[0], caseId]
+      [cnt, urls[0], caseId]
     );
 
     return res
