@@ -195,7 +195,11 @@ export default function CaseDetailPage() {
 
   const sc = STATUS_CONFIG[caseData.status] ?? STATUS_CONFIG.draft;
   const tabs = getTabs(caseData.status, caseData.image_count);
-  const vitals = caseData.vitals_json ? JSON.parse(caseData.vitals_json) : null;
+  const vitals = caseData.vitals_json
+    ? typeof caseData.vitals_json === "string"
+      ? JSON.parse(caseData.vitals_json)
+      : caseData.vitals_json
+    : null;
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-GH", {
@@ -428,7 +432,7 @@ export default function CaseDetailPage() {
               {images.map((img) => (
                 <div key={img.id} style={s.imageCard}>
                   <img
-                    src={`import.meta.env.VITE_UPLOADS_URL/${img.file_path}`}
+                    src={`${import.meta.env.VITE_UPLOADS_URL}/${img.file_path}`}
                     alt={`Case ${caseData.case_id} image`}
                     style={s.imageEl}
                   />

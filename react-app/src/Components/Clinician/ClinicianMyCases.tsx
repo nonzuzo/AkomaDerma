@@ -82,7 +82,7 @@ export default function ClinicianCasesDashboard() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
-  const [cases, setCases] = useState<CaseItem[]>([]);
+  const [cases, setCases] = useState<CaseItem[]>([]); // co
   const [filtered, setFiltered] = useState<CaseItem[]>([]);
   const [activeTab, setActiveTab] = useState(params.get("filter") || "all");
   const [search, setSearch] = useState("");
