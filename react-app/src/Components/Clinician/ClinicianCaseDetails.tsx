@@ -1,4 +1,17 @@
 // src/pages/clinician/CaseDetailPage.tsx
+//debugging
+const origParse = JSON.parse;
+JSON.parse = function(...args) {
+  if (typeof args[0] !== "string") {
+    console.error("JSON.parse called with non-string:", args[0]);
+    console.trace(); // gives you the REAL call site
+  }
+  return origParse.apply(this, args);
+};
+//debugging
+
+
+
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
